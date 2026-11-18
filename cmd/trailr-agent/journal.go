@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
+	"net"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -78,10 +79,12 @@ type journalLeser struct {
 func neuerJournalLeser() *journalLeser { return &journalLeser{sitzung: map[string]string{}} }
 
 var (
-	sshAngenommen = regexp.MustCompile(`^Accepted (\S+) for (\S+) from (\S+) port \d+`)
-	sshFehl       = regexp.MustCompile(`^Failed (\S+) for (?:invalid user )?(\S+) from (\S+) port \d+`)
-	sshUnbekannt  = regexp.MustCompile(`^Invalid user (\S*) from (\S+)`)
-	sshWeg        = regexp.MustCompile(`^Disconnected from user (\S+) (\S+) port \d+`)
+	// Angelegt am Zeilenende: ein Benutzername mit " from 1.2.3.4 port"
+	// darin verschiebt die Quelle nicht.
+	sshAngenommen = regexp.MustCompile(`^Accepted (\S+) for (\S+) from (\S+) port \d+ ssh2(?:: .*)?$`)
+	sshFehl       = regexp.MustCompile(`^Failed (\S+) for (?:invalid user )?(.*) from (\S+) port \d+ ssh2$`)
+	sshUnbekannt  = regexp.MustCompile(`^Invalid user (.*) from (\S+) port \d+$`)
+	sshWeg        = regexp.MustCompile(`^Disconnected from (?:authenticating )?user (\S+) (\S+) port \d+(?: \[preauth\])?$`)
 	sudoZeile     = regexp.MustCompile(`^\s*(\S+) : (.*?)(?:TTY=(\S+) ; )?PWD=(\S+) ; USER=(\S+) ;(?: [A-Z]+=\S+ ;)* COMMAND=(.*)$`)
 	suZeile       = regexp.MustCompile(`^(FAILED SU )?\(to (\S+)\) (\S+) on (\S+)`)
 	logindNeu     = regexp.MustCompile(`^New session (\S+) of user (\S+)\.`)
@@ -111,14 +114,20 @@ func (z *journalLeser) zeile(roh []byte) (ereignis.Ereignis, string, bool) {
 	if json.Unmarshal(roh, &f) != nil {
 		return ereignis.Ereignis{}, "", false
 	}
-	var cursor, ident, zeit string
+	var cursor, ident, zeit, uid string
 	json.Unmarshal(f["__CURSOR"], &cursor)
+	// _UID setzt das Journal selbst, nicht der Absender: nur Zeilen von root
+	// zählen. Sonst könnte jeder mit logger -t sudo etwas vortäuschen.
+	json.Unmarshal(f["_UID"], &uid)
 	json.Unmarshal(f["SYSLOG_IDENTIFIER"], &ident)
 	json.Unmarshal(f["__REALTIME_TIMESTAMP"], &zeit)
 	us, _ := strconv.ParseInt(zeit, 10, 64)
 	msg := nachricht(f["MESSAGE"])
 	h := sha256.Sum256([]byte(cursor))
 	e := ereignis.Ereignis{Kennung: "j:" + hex.EncodeToString(h[:12]), Zeit: time.UnixMicro(us), Erfolg: true}
+	if uid != "0" {
+		return e, cursor, false
+	}
 	ok := z.deuten(ident, msg, &e)
 	return e, cursor, ok
 }
@@ -128,6 +137,11 @@ func (z *journalLeser) zeile(roh []byte) (ereignis.Ereignis, string, bool) {
 func (z *journalLeser) deuten(ident, msg string, e *ereignis.Ereignis) bool {
 	switch ident {
 	case "sshd", "sshd-session":
+		defer func() {
+			if net.ParseIP(e.Quelle) == nil {
+				e.Quelle = "ungültig: " + e.Quelle
+			}
+		}()
 		if m := sshAngenommen.FindStringSubmatch(msg); m != nil {
 			e.Art, e.Benutzer, e.Quelle, e.Text = "anmeldung", m[2], m[3], "SSH mit "+m[1]
 			return true

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -22,13 +24,14 @@ var hostMuster = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.\-]{0,62}$`)
 // lieferung nimmt ein Paket des Agenten an. Je Host wird in einer
 // Transaktion verkettet, die Zeile des Hosts ist dabei gesperrt: zwei
 // gleichzeitige Pakete eines Hosts können die Kette nicht verzweigen.
-func (a *App) lieferung(w http.ResponseWriter, r *http.Request) {
+func (a *App) lieferung(w http.ResponseWriter, r *http.Request, host string) {
 	var l ereignis.Lieferung
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&l); err != nil {
 		alsJSON(w, 400, map[string]string{"fehler": "unlesbar"})
 		return
 	}
-	if !hostMuster.MatchString(l.Host) || len(l.Ereignisse) > 5000 {
+	// Der Host kommt aus dem Schlüssel, nicht aus dem Paket.
+	if l.Host != host || len(l.Ereignisse) > 5000 {
 		alsJSON(w, 400, map[string]string{"fehler": "Host oder Menge ungültig"})
 		return
 	}
@@ -51,7 +54,8 @@ func (a *App) lieferung(w http.ResponseWriter, r *http.Request) {
 	}
 	neu := 0
 	for _, e := range l.Ereignisse {
-		if e.Kennung == "" || e.Zeit.IsZero() || !gueltigeArt(e.Art) {
+		// Zeiten aus der Zukunft würden das Aufräumen unterlaufen.
+		if e.Kennung == "" || e.Zeit.IsZero() || !gueltigeArt(e.Art) || e.Zeit.After(time.Now().Add(time.Hour)) {
 			continue
 		}
 		e.Zeit = e.Zeit.Truncate(time.Microsecond)
@@ -107,6 +111,20 @@ func kuerzen(s string, n int) string {
 	return s[:n]
 }
 
+// agentPruefsumme: SHA-256 des Agenten, für die Prüfung beim Herunterladen.
+func (a *App) agentPruefsumme(w http.ResponseWriter, r *http.Request) {
+	f, err := os.Open(a.agentDatei)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	h := sha256.New()
+	io.Copy(h, f)
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprintf(w, "%x  trailr-agent\n", h.Sum(nil))
+}
+
 func (a *App) agentProgramm(w http.ResponseWriter, r *http.Request) {
 	f, err := os.Open(a.agentDatei)
 	if err != nil {
@@ -127,7 +145,7 @@ func (a *App) aufraeumen(ctx context.Context) {
 		return
 	}
 	for {
-		tag, err := a.db.Exec(ctx, `DELETE FROM ereignisse WHERE zeit < now() - make_interval(days => $1)`, a.tage)
+		tag, err := a.db.Exec(ctx, `DELETE FROM ereignisse WHERE empfangen < now() - make_interval(days => $1)`, a.tage)
 		if err != nil {
 			log.Printf("Aufräumen: %v", err)
 		} else if tag.RowsAffected() > 0 {

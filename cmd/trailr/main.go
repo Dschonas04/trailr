@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"log"
 	"net/http"
@@ -68,6 +70,7 @@ func (a *App) wege() http.Handler {
 	a.sso.Wege(m, a.angemeldet)
 	m.HandleFunc("POST /api/lieferung", a.agentPruefen(a.lieferung))
 	m.HandleFunc("GET /agent/trailr-agent", a.agentProgramm)
+	m.HandleFunc("GET /agent/trailr-agent.sha256", a.agentPruefsumme)
 	m.HandleFunc("GET /{$}", a.start)
 	m.HandleFunc("GET /ereignisse", a.ereignisse)
 	m.HandleFunc("GET /pruefen", a.pruefenSeite)
@@ -85,14 +88,23 @@ func (a *App) angemeldet(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (a *App) agentPruefen(h http.HandlerFunc) http.HandlerFunc {
+// hostSchluessel: jeder Host liefert mit einem eigenen Schlüssel, abgeleitet
+// aus dem Hauptschlüssel und seinem Namen. Wer einen Host übernimmt, kann
+// damit nur in dessen Namen schreiben, nicht für andere.
+func hostSchluessel(haupt, host string) string {
+	h := sha256.Sum256([]byte(haupt + ":" + host))
+	return hex.EncodeToString(h[:])
+}
+
+func (a *App) agentPruefen(h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		host := r.Header.Get("X-Trailr-Host")
 		k := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(k), []byte(a.schluessel)) != 1 {
+		if !hostMuster.MatchString(host) || subtle.ConstantTimeCompare([]byte(k), []byte(hostSchluessel(a.schluessel, host))) != 1 {
 			alsJSON(w, http.StatusUnauthorized, map[string]string{"fehler": "Agent-Schlüssel falsch"})
 			return
 		}
-		h(w, r)
+		h(w, r, host)
 	}
 }
 

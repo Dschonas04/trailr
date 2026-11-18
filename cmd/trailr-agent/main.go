@@ -50,6 +50,10 @@ func main() {
 	if *server == "" || schluessel == "" {
 		log.Fatal("TRAILR_SERVER und TRAILR_SCHLUESSEL müssen gesetzt sein")
 	}
+	// Der Schlüssel geht nie unverschlüsselt über das Netz.
+	if !strings.HasPrefix(*server, "https://") && os.Getenv("TRAILR_UNSICHER") != "1" {
+		log.Fatal("TRAILR_SERVER muss mit https:// beginnen")
+	}
 	host, _ := os.Hostname()
 	if h := os.Getenv("TRAILR_HOST"); h != "" {
 		host = h
@@ -219,6 +223,7 @@ func (a *agent) post(l []ereignis.Ereignis) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+a.schluessel)
+	req.Header.Set("X-Trailr-Host", a.host)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := a.client.Do(req)
 	if err != nil {

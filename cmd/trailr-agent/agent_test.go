@@ -17,6 +17,7 @@ func TestJournalDeuten(t *testing.T) {
 		{"sshd", "Accepted publickey for jonas from 10.0.0.5 port 50122 ssh2: ED25519 SHA256:abc", "anmeldung", "jonas", true},
 		{"sshd-session", "Failed password for invalid user admin from 1.2.3.4 port 22 ssh2", "anmeldung", "admin", false},
 		{"sshd", "Invalid user  from 1.2.3.4 port 22", "anmeldung", "(leer)", false},
+		{"sshd", "Invalid user x from 9.9.9.9 port 1 from 1.2.3.4 port 22", "anmeldung", "x from 9.9.9.9 port 1", false},
 		{"sshd", "Disconnected from user jonas 10.0.0.5 port 50122", "abmeldung", "jonas", true},
 		{"sudo", "   jonas : TTY=pts/0 ; PWD=/home/jonas ; USER=root ; COMMAND=/usr/bin/apt update", "sudo", "jonas", true},
 		{"sudo", "   gast : 3 incorrect password attempts ; TTY=pts/1 ; PWD=/ ; USER=root ; COMMAND=/bin/bash", "sudo", "gast", false},
@@ -90,5 +91,17 @@ func TestKette(t *testing.T) {
 	e.Text = "anders"
 	if ereignis.Hash("", e) == a || ereignis.Hash("v", e) == ereignis.Hash("", e) {
 		t.Fatal("Hash unempfindlich")
+	}
+}
+
+func TestNurVonRoot(t *testing.T) {
+	z := neuerJournalLeser()
+	gefaelscht := []byte(`{"__CURSOR":"c1","SYSLOG_IDENTIFIER":"sudo","_UID":"1000","__REALTIME_TIMESTAMP":"1","MESSAGE":"root : TTY=pts/0 ; PWD=/ ; USER=root ; COMMAND=/bin/true"}`)
+	if _, _, ok := z.zeile(gefaelscht); ok {
+		t.Fatal("Zeile eines Benutzers als sudo angenommen")
+	}
+	echt := []byte(`{"__CURSOR":"c2","SYSLOG_IDENTIFIER":"sudo","_UID":"0","__REALTIME_TIMESTAMP":"1","MESSAGE":"jonas : TTY=pts/0 ; PWD=/ ; USER=root ; COMMAND=/bin/true"}`)
+	if _, _, ok := z.zeile(echt); !ok {
+		t.Fatal("echte sudo-Zeile verworfen")
 	}
 }
