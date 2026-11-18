@@ -1,0 +1,14 @@
+{{define "inhalt"}}
+<div class="leiste"><h1>Kette prüfen</h1><a class="knopf primaer" href="/pruefen?los=ja">Jetzt prüfen</a></div>
+<p class="muted">Jedes Ereignis trägt den Hash seines Vorgängers. Die Prüfung rechnet die Kette je Host nach: wurde ein Eintrag geändert, gelöscht oder eingeschoben, fällt es hier auf.</p>
+{{if .D.Gelaufen}}
+<table>
+  <tr><th>Host</th><th>Einträge</th><th>Ergebnis</th><th>Dauer</th></tr>
+  {{range .D.Ergebnis}}
+  <tr><td>{{.Host}}</td><td>{{.Anzahl}}</td>
+    <td>{{if .OK}}<span class="pille gut">unverändert</span>{{else}}<span class="pille schlecht">{{.Grund}}</span>{{if .Bruch}}<div class="muted klein">bei Nr. {{.Bruch.ID}}, {{datum .Bruch.Zeit}}, {{.Bruch.Art}} {{.Bruch.Benutzer}}</div>{{end}}{{end}}</td>
+    <td class="muted">{{.Dauer}}</td></tr>
+  {{else}}<tr><td colspan="4" class="muted">Keine Hosts.</td></tr>{{end}}
+</table>
+{{end}}
+{{end}}

@@ -1,0 +1,22 @@
+{{define "inhalt"}}
+<h1>Agent einrichten</h1>
+<div class="karte">
+<p>Der Agent ist ein einzelnes Programm. Er liest das Journal (SSH, sudo, su, Sitzungen) und, wenn auditd läuft, ausgeführte Befehle und Änderungen an überwachten Pfaden. Was nicht ankommt, puffert er und schickt es später.</p>
+<pre class="code">sudo curl -fsSo /usr/local/bin/trailr-agent {{.D.Server}}/agent/trailr-agent
+sudo chmod 755 /usr/local/bin/trailr-agent
+sudo mkdir -p /etc/trailr
+printf 'TRAILR_SERVER={{.D.Server}}\nTRAILR_SCHLUESSEL=...\n' | sudo tee /etc/trailr/agent.env
+sudo chmod 600 /etc/trailr/agent.env
+
+# Befehle und Dateien (optional): auditd mit den Regeln aus dem Repository
+sudo apt install -y auditd
+sudo cp agent/ansible/trailr_agent/files/audit.rules /etc/audit/rules.d/trailr.rules
+sudo augenrules --load
+
+# Dienst
+sudo cp agent/ansible/trailr_agent/files/trailr-agent.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now trailr-agent</pre>
+<p class="muted klein">Den Agent-Schlüssel (TRAILR_AGENT_SCHLUESSEL aus der .env des Servers) statt der Punkte eintragen. Regeln und Dienst liegen im Repository in der Ansible-Rolle unter <span class="code">agent/ansible/trailr_agent/files</span>. Ereignisse werden {{.D.Tage}} Tage aufbewahrt.</p>
+</div>
+{{end}}

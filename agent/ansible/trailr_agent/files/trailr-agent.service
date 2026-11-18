@@ -4,15 +4,18 @@ After=network-online.target auditd.service
 Wants=network-online.target
 
 [Service]
-EnvironmentFile=-/etc/trailr/agent.env
+EnvironmentFile=/etc/trailr/agent.env
 ExecStart=/usr/local/bin/trailr-agent
 Restart=always
 RestartSec=5
-SupplementaryGroups=systemd-journal adm
 StateDirectory=trailr
+StateDirectoryMode=0700
+# Liest Journal und auditd-Protokoll, schreibt nur in /var/lib/trailr.
 ProtectSystem=strict
-ProtectHome=read-only
-NoNewPrivileges=true
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadWritePaths=/var/lib/trailr
 
 [Install]
 WantedBy=multi-user.target

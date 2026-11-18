@@ -1,0 +1,6 @@
+---
+# Adresse des Trailr-Servers und Agent-Schlüssel (aus dem Vault).
+trailr_server: "https://10.0.2.7:8400"
+trailr_schluessel: "{{ vault_trailr_agent_schluessel }}"
+# auditd mit den Regeln für Befehle und Dateien einrichten.
+trailr_auditd: true

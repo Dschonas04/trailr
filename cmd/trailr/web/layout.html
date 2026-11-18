@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{if .Titel}}{{.Titel}} · {{end}}{{.App}}</title>
+<link rel="stylesheet" href="/statisch/stil.css">
+<link rel="icon" href="/statisch/zeichen.svg" type="image/svg+xml">
+{{block "kopfzeilen" .}}{{end}}
+</head>
+<body>
+<header class="kopf">
+  <a class="marke" href="/"><img src="/statisch/zeichen.svg" alt="" width="22" height="22">{{.App}}</a>
+  <nav>{{template "nav" .}}</nav>
+  {{if .Nutzer.Name}}<div class="wer"><span>{{.Nutzer.Name}}</span><a href="/sso/abmelden">Abmelden</a></div>
+  {{else if .Nutzer.Nutzer}}<div class="wer"><span>{{.Nutzer.Nutzer}}</span><a href="/sso/abmelden">Abmelden</a></div>{{end}}
+</header>
+<main{{block "mainklasse" .}}{{end}}>
+  {{if .Hinweis}}<div class="hinweis">{{.Hinweis}}</div>{{end}}
+  {{if .Fehler}}<div class="fehler">{{.Fehler}}</div>{{end}}
+  {{template "inhalt" .}}
+</main>
+{{block "skripte" .}}{{end}}
+</body>
+</html>

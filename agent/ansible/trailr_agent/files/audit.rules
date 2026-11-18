@@ -1,0 +1,11 @@
+# auditd-Regeln für trailr-agent. Nach /etc/audit/rules.d/trailr.rules, dann augenrules --load.
+# Befehle von Menschen: nur mit Login-UID (auch nach sudo), Dienste haben keine.
+-a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=unset -k trailr_befehl
+-a always,exit -F arch=b32 -S execve -F auid>=1000 -F auid!=unset -k trailr_befehl
+# root, der sich direkt anmeldet (SSH als root), hat Login-UID 0:
+-a always,exit -F arch=b64 -S execve -F auid=0 -k trailr_befehl
+-a always,exit -F arch=b32 -S execve -F auid=0 -k trailr_befehl
+# Überwachte Pfade, nur Änderungen von Menschen:
+-a always,exit -F dir=/etc -F perm=wa -F auid>=0 -F auid!=unset -k trailr_datei
+-a always,exit -F dir=/root/.ssh -F perm=wa -F auid!=unset -k trailr_datei
+-a always,exit -F dir=/usr/local/bin -F perm=wa -F auid!=unset -k trailr_datei

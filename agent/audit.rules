@@ -1,8 +1,0 @@
-# auditd-Regeln für trailr-agent. Nach /etc/audit/rules.d/trailr.rules.
-# Befehle echter Benutzer (Login-UID ab 1000), auch nach sudo:
--a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=unset -k trailr_befehl
--a always,exit -F arch=b32 -S execve -F auid>=1000 -F auid!=unset -k trailr_befehl
-# Überwachte Pfade:
--w /etc/ -p wa -k trailr_datei
--w /root/.ssh/ -p wa -k trailr_datei
--w /etc/sudoers.d/ -p wa -k trailr_datei

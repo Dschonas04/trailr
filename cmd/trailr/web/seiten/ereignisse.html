@@ -1,0 +1,32 @@
+{{define "inhalt"}}
+{{$d := .D}}
+<div class="leiste"><h1>Ereignisse</h1><a class="knopf" href="/ereignisse?{{$d.Abfrage}}&amp;format=csv">Als CSV</a></div>
+<form class="filter" method="get" action="/ereignisse">
+  <select name="host" aria-label="Host"><option value="">Alle Hosts</option>{{range $d.Hosts}}<option{{if eq .Name $d.F.Host}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+  <select name="benutzer" aria-label="Benutzer"><option value="">Alle Benutzer</option>{{range $d.Benutzer}}<option{{if eq . $d.F.Benutzer}} selected{{end}}>{{.}}</option>{{end}}</select>
+  <select name="art" aria-label="Art"><option value="">Alle Arten</option>{{range $d.Arten}}<option{{if eq . $d.F.Art}} selected{{end}}>{{.}}</option>{{end}}</select>
+  <input type="search" name="q" value="{{$d.F.Suche}}" placeholder="Befehl, Pfad, IP" style="min-width:180px">
+  <input type="datetime-local" name="von" value="{{$d.F.Von}}" aria-label="von">
+  <input type="datetime-local" name="bis" value="{{$d.F.Bis}}" aria-label="bis">
+  <label style="margin:0;align-self:center"><input type="checkbox" name="fehl" value="ja"{{if $d.F.Fehl}} checked{{end}}> nur Fehlschläge</label>
+  {{if $d.F.Sitzung}}<input type="hidden" name="sitzung" value="{{$d.F.Sitzung}}"><span class="pille info">Sitzung {{$d.F.Sitzung}}</span>{{end}}
+  <button>Filtern</button>
+</form>
+{{if $d.Liste}}{{template "tabelle" $d.Liste}}{{if $d.Voll}}<p class="muted klein">Die neuesten 1000 Treffer. Filter enger fassen oder als CSV laden.</p>{{end}}
+{{else}}<div class="leer">Keine Ereignisse für diesen Filter.</div>{{end}}
+{{end}}
+{{define "tabelle"}}
+<table>
+  <tr><th>Zeit</th><th>Host</th><th>Art</th><th>Benutzer</th><th>Was</th><th class="weg">Quelle</th></tr>
+  {{range .}}
+  <tr class="zeile">
+    <td class="muted klein" style="white-space:nowrap">{{datum .Zeit}}</td>
+    <td><a href="/ereignisse?host={{.Host}}">{{.Host}}</a></td>
+    <td><span class="pille {{.Klasse}}">{{.ArtName}}{{if not .Erfolg}} fehlgeschlagen{{end}}</span></td>
+    <td><a href="/ereignisse?benutzer={{.Benutzer}}">{{.Benutzer}}</a>{{if and .Als (ne .Als .Benutzer)}} <span class="muted">als {{.Als}}</span>{{end}}</td>
+    <td class="code" style="word-break:break-all">{{.Text}}{{if .Sitzung}} <a class="muted klein" href="/ereignisse?host={{.Host}}&amp;sitzung={{.Sitzung}}">Sitzung {{.Sitzung}}</a>{{end}}</td>
+    <td class="weg muted klein">{{.Quelle}}</td>
+  </tr>
+  {{end}}
+</table>
+{{end}}

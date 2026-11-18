@@ -2,8 +2,10 @@
 
 Protokolliert, was Benutzer auf Linux-Systemen tun: Anmeldungen, Befehle, sudo, Änderungen. Zentral und manipulationssicher.
 
-**Stand: Grundgerüst.** Der Server startet und zeigt eine Startseite, die
-Funktionen unten sind geplant.
+**Stand: 0.1.** Agent und Server laufen: Anmeldungen (SSH), sudo, su,
+Sitzungen aus dem Journal, Befehle und Dateiänderungen über auditd, Puffer
+auf dem Host, Hash-Kette je Host mit Prüfung, Übersicht, Filter, Sitzungen,
+CSV-Export, Aufbewahrungsfrist. Alarme kommen noch.
 
 ## Geplant
 
@@ -26,7 +28,7 @@ cmd/trailr-agent   Agent: läuft auf jedem Linux-Host als systemd-Dienst
 ```
 
 Der Agent braucht Leserechte auf das Journal (Gruppe `systemd-journal`) und,
-für Befehle und Dateien, auditd mit den Regeln aus `agent/audit.rules`.
+für Befehle und Dateien, auditd mit den Regeln aus `agent/ansible/trailr_agent/files/audit.rules`.
 
 ## Schritte
 
@@ -50,7 +52,8 @@ der Homelab-CA davor, der Dienst selbst lauscht dann auf `127.0.0.1:28400`.
 ## Entwickeln
 
 ```bash
-go run ./cmd/trailr
+go run ./cmd/trailr            # braucht TRAILR_AGENT_SCHLUESSEL
+TRAILR_SERVER=http://localhost:8400 TRAILR_SCHLUESSEL=... go run ./cmd/trailr-agent -stand /tmp/trailr
 go test ./...
 ```
 

@@ -1,0 +1,51 @@
+---
+- name: Trailr, Agent laden
+  ansible.builtin.get_url:
+    url: "{{ trailr_server }}/agent/trailr-agent"
+    dest: /usr/local/bin/trailr-agent
+    mode: "0755"
+    force: true
+  notify: Trailr neu starten
+
+- name: Trailr, Verzeichnis für Einstellungen
+  ansible.builtin.file:
+    path: /etc/trailr
+    state: directory
+    mode: "0700"
+
+- name: Trailr, Einstellungen
+  ansible.builtin.copy:
+    dest: /etc/trailr/agent.env
+    content: |
+      TRAILR_SERVER={{ trailr_server }}
+      TRAILR_SCHLUESSEL={{ trailr_schluessel }}
+    mode: "0600"
+  no_log: true
+  notify: Trailr neu starten
+
+- name: Trailr, auditd
+  when: trailr_auditd
+  block:
+    - name: Trailr, auditd installieren
+      ansible.builtin.package:
+        name: "{{ 'audit' if ansible_os_family == 'RedHat' else 'auditd' }}"
+    - name: Trailr, Regeln
+      ansible.builtin.copy:
+        src: audit.rules
+        dest: /etc/audit/rules.d/trailr.rules
+        mode: "0640"
+      notify: Trailr Regeln laden
+
+- name: Trailr, Dienst
+  ansible.builtin.copy:
+    src: trailr-agent.service
+    dest: /etc/systemd/system/trailr-agent.service
+    mode: "0644"
+  notify: Trailr neu starten
+
+- name: Trailr, Dienst an
+  ansible.builtin.systemd:
+    name: trailr-agent
+    enabled: true
+    state: started
+    daemon_reload: true
