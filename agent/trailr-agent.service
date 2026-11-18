@@ -1,0 +1,18 @@
+[Unit]
+Description=Trailr-Agent: Benutzeraktionen an den Trailr-Server
+After=network-online.target auditd.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/trailr/agent.env
+ExecStart=/usr/local/bin/trailr-agent
+Restart=always
+RestartSec=5
+SupplementaryGroups=systemd-journal adm
+StateDirectory=trailr
+ProtectSystem=strict
+ProtectHome=read-only
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

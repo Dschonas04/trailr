@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trailr</title>
+<style>
+  :root { --bg: #fafafa; --text: #161616; --muted: #666; --rand: #e3e3e3; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #121212; --text: #eee; --muted: #9a9a9a; --rand: #2a2a2a; } }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 12vh auto; padding: 0 16px; }
+  h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: -0.02em; }
+  p { color: var(--muted); margin: 0 0 24px; }
+  ul { padding-left: 18px; border-top: 1px solid var(--rand); padding-top: 16px; }
+  li { margin: 4px 0; }
+  .stand { font-size: 12px; color: var(--muted); margin-top: 32px; }
+</style>
+</head>
+<body>
+  <main>
+    <h1>Trailr</h1>
+    <p>Protokolliert, was Benutzer auf Linux-Systemen tun: Anmeldungen, Befehle, sudo, Änderungen. Zentral und manipulationssicher.</p>
+    <ul>
+      <li>Agent auf jedem Host (ein statisches Go-Programm, systemd-Dienst), verteilt per Ansible-Rolle</li>
+      <li>Anmeldungen: SSH, Konsole, su, sudo, mit Quelle, Schlüssel oder Kennwort, Erfolg und Fehlschlag</li>
+      <li>Ausgeführte Befehle über auditd (execve mit Login-UID): auch nach sudo bleibt sichtbar, wer es war</li>
+      <li>Änderungen an überwachten Pfaden (/etc, Schlüssel, Cron, systemd-Units)</li>
+      <li>Pakete und Dienste: apt/dnf-Installationen, systemctl start/stop/enable</li>
+      <li>Zentraler Server mit Suche nach Benutzer, Host, Zeitraum und Befehl, Sitzungen als Zeitleiste</li>
+      <li>Manipulationssicher: Ereignisse in einer Hash-Kette je Host, Lücken und Änderungen fallen auf</li>
+      <li>Alarme per Telegram oder Mail (z. B. sudo außerhalb der Arbeitszeit, unbekannte Quelle)</li>
+      <li>Übertragung mit mTLS über die Homelab-CA, Puffer auf dem Host, wenn der Server fehlt</li>
+      <li>Aufbewahrungsfristen und Export (JSON, CSV)</li>
+    </ul>
+    <div class="stand">In Vorbereitung</div>
+  </main>
+</body>
+</html>
