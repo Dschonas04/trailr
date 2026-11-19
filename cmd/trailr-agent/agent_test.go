@@ -50,7 +50,7 @@ func TestAuditSammeln(t *testing.T) {
 	}
 	var l []ereignis.Ereignis
 	for _, z := range zeilen {
-		l = append(l, s.zeile(z)...)
+		l = append(l, s.zeile(z, 0)...)
 	}
 	if len(l) != 1 {
 		t.Fatalf("%d Ereignisse", len(l))
@@ -60,16 +60,16 @@ func TestAuditSammeln(t *testing.T) {
 		t.Fatalf("%+v", e)
 	}
 	// Ohne Login-UID (Dienste) kein Ereignis.
-	s.zeile(`type=SYSCALL msg=audit(1731940001.000:4568): syscall=59 success=yes auid=4294967295 uid=0 euid=0 ses=4294967295 tty=(none) exe="/usr/bin/cron" key="trailr_befehl"`)
-	s.zeile(`type=EXECVE msg=audit(1731940001.000:4568): argc=1 a0="cron"`)
-	if l := s.zeile(`type=EOE msg=audit(1731940001.000:4568): `); len(l) != 0 {
+	s.zeile(`type=SYSCALL msg=audit(1731940001.000:4568): syscall=59 success=yes auid=4294967295 uid=0 euid=0 ses=4294967295 tty=(none) exe="/usr/bin/cron" key="trailr_befehl"`, 0)
+	s.zeile(`type=EXECVE msg=audit(1731940001.000:4568): argc=1 a0="cron"`, 0)
+	if l := s.zeile(`type=EOE msg=audit(1731940001.000:4568): `, 0); len(l) != 0 {
 		t.Fatal("Dienst gemeldet")
 	}
 	// Datei
-	s.zeile(`type=SYSCALL msg=audit(1731940002.000:4569): syscall=257 success=yes auid=0 uid=0 euid=0 ses=3 tty=pts0 exe="/usr/bin/vim.basic" key="trailr_datei"`)
-	s.zeile(`type=PATH msg=audit(1731940002.000:4569): item=0 name="/etc/" nametype=PARENT`)
-	s.zeile(`type=PATH msg=audit(1731940002.000:4569): item=1 name="/etc/hosts" nametype=CREATE`)
-	l = s.zeile(`type=EOE msg=audit(1731940002.000:4569): `)
+	s.zeile(`type=SYSCALL msg=audit(1731940002.000:4569): syscall=257 success=yes auid=0 uid=0 euid=0 ses=3 tty=pts0 exe="/usr/bin/vim.basic" key="trailr_datei"`, 0)
+	s.zeile(`type=PATH msg=audit(1731940002.000:4569): item=0 name="/etc/" nametype=PARENT`, 0)
+	s.zeile(`type=PATH msg=audit(1731940002.000:4569): item=1 name="/etc/hosts" nametype=CREATE`, 0)
+	l = s.zeile(`type=EOE msg=audit(1731940002.000:4569): `, 0)
 	if len(l) != 1 || l[0].Art != "datei" || !strings.Contains(l[0].Text, "/etc/hosts (neu)") {
 		t.Fatalf("Datei: %+v", l)
 	}
@@ -107,24 +107,41 @@ func TestAuditSudoSu(t *testing.T) {
 	s := neuerAuditSammler()
 	s.namen.m["1000"] = "debian"
 	cmd := "646F636B6572207073" // "docker ps"
-	l := s.zeile(`type=USER_CMD msg=audit(1795067527.074:1): pid=7 uid=1000 auid=1000 ses=850 subj=unconfined msg='cwd="/home/debian" cmd=` + cmd + ` exe="/usr/bin/sudo" terminal=pts/0 res=success'` + "\x1d" + `UID="debian"`)
+	l := s.zeile(`type=USER_CMD msg=audit(1795067527.074:1): pid=7 uid=1000 auid=1000 ses=850 subj=unconfined msg='cwd="/home/debian" cmd=`+cmd+` exe="/usr/bin/sudo" terminal=pts/0 res=success'`+"\x1d"+`UID="debian"`, 0)
 	if len(l) != 0 {
 		t.Fatal("sudo zu früh gemeldet")
 	}
-	l = s.zeile(`type=USER_START msg=audit(1795067527.078:2): pid=7 uid=1000 auid=1000 ses=850 subj=unconfined msg='op=PAM:session_open grantors=pam_unix acct="root" exe="/usr/bin/sudo" hostname=? addr=? terminal=pts/0 res=success'`)
+	l = s.zeile(`type=USER_START msg=audit(1795067527.078:2): pid=7 uid=1000 auid=1000 ses=850 subj=unconfined msg='op=PAM:session_open grantors=pam_unix acct="root" exe="/usr/bin/sudo" hostname=? addr=? terminal=pts/0 res=success'`, 0)
 	if len(l) != 1 || l[0].Art != "sudo" || l[0].Benutzer != "debian" || l[0].Als != "root" || l[0].Text != "docker ps" || !l[0].Erfolg {
 		t.Fatalf("sudo: %+v", l)
 	}
-	l = s.zeile(`type=USER_START msg=audit(1795067600.000:3): pid=9 uid=1000 auid=1000 ses=851 subj=unconfined msg='op=PAM:session_open grantors=pam_unix acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/1 res=success'`)
+	l = s.zeile(`type=USER_START msg=audit(1795067600.000:3): pid=9 uid=1000 auid=1000 ses=851 subj=unconfined msg='op=PAM:session_open grantors=pam_unix acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/1 res=success'`, 0)
 	if len(l) != 1 || l[0].Art != "su" || l[0].Als != "root" || l[0].Benutzer != "debian" {
 		t.Fatalf("su: %+v", l)
 	}
-	l = s.zeile(`type=USER_AUTH msg=audit(1795067600.100:4): pid=10 uid=1000 auid=1000 ses=851 subj=unconfined msg='op=PAM:authentication grantors=? acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/1 res=failed'`)
+	l = s.zeile(`type=USER_AUTH msg=audit(1795067600.100:4): pid=10 uid=1000 auid=1000 ses=851 subj=unconfined msg='op=PAM:authentication grantors=? acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/1 res=failed'`, 0)
 	if len(l) != 1 || l[0].Erfolg {
 		t.Fatalf("su falsch: %+v", l)
 	}
 	// Anderes Programm mit USER_START (etwa cron) zählt nicht.
-	if l = s.zeile(`type=USER_START msg=audit(1795067600.200:5): pid=11 uid=0 auid=0 ses=1 msg='op=PAM:session_open acct="root" exe="/usr/sbin/cron" res=success'`); len(l) != 0 {
+	if l = s.zeile(`type=USER_START msg=audit(1795067600.200:5): pid=11 uid=0 auid=0 ses=1 msg='op=PAM:session_open acct="root" exe="/usr/sbin/cron" res=success'`, 0); len(l) != 0 {
 		t.Fatalf("cron gemeldet: %+v", l)
+	}
+}
+
+func TestAuditSudoNichtUeberschreibbar(t *testing.T) {
+	s := neuerAuditSammler()
+	// Ein zweites exe= im Programmtext darf das echte nicht ersetzen.
+	l := s.zeile(`type=USER_START msg=audit(1795067600.000:9): pid=9 uid=1000 auid=1000 ses=1 msg='op=PAM:session_open acct="root" exe="/usr/sbin/cron" x=1 exe="/usr/bin/su" res=success'`, 0)
+	if len(l) != 0 {
+		t.Fatalf("gefälschtes exe angenommen: %+v", l)
+	}
+	// Offener sudo-Satz hält die gespeicherte Stelle fest und kommt bei alles() mit.
+	s.zeile(`type=USER_CMD msg=audit(1795067600.000:10): pid=12 uid=1000 auid=1000 ses=1 msg='cwd="/" cmd=6964 exe="/usr/bin/sudo" terminal=? res=success'`, 500)
+	if s.sicherePos(900) != 500 {
+		t.Fatal("Stelle läuft über offenen sudo hinaus")
+	}
+	if l := s.alles(); len(l) != 1 || l[0].Art != "sudo" {
+		t.Fatalf("offener sudo verloren: %+v", l)
 	}
 }

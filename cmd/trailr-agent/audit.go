@@ -99,7 +99,7 @@ func (a *agent) auditDatei(ctx context.Context, f *os.File, pfad string) {
 				}
 			}
 			for _, ev := range s.alteAbschliessen() {
-				a.melden(ev, "", &auditStand{Inode: ino, Offset: pos})
+				a.melden(ev, "", &auditStand{Inode: ino, Offset: s.sicherePos(pos)})
 			}
 			time.Sleep(500 * time.Millisecond)
 			continue
@@ -109,9 +109,10 @@ func (a *agent) auditDatei(ctx context.Context, f *os.File, pfad string) {
 		}
 		zeile = rest + zeile
 		rest = ""
+		anfang := pos
 		pos += int64(len(zeile))
-		for _, ev := range s.zeile(strings.TrimRight(zeile, "\n")) {
-			a.melden(ev, "", &auditStand{Inode: ino, Offset: pos})
+		for _, ev := range s.zeile(strings.TrimRight(zeile, "\n"), anfang) {
+			a.melden(ev, "", &auditStand{Inode: ino, Offset: s.sicherePos(pos)})
 		}
 	}
 }
@@ -124,6 +125,7 @@ type auditSatz struct {
 	pfade   []map[string]string
 	cwd     string
 	zuletzt time.Time
+	start   int64
 }
 
 type auditSammler struct {
@@ -135,8 +137,26 @@ type auditSammler struct {
 }
 
 type sudoOffen struct {
-	e    ereignis.Ereignis
-	seit time.Time
+	e     ereignis.Ereignis
+	seit  time.Time
+	start int64
+}
+
+// sicherePos: bis wohin die Datei als erledigt gilt. Nie über den Anfang
+// eines noch offenen Satzes hinaus, sonst ginge er bei einem Neustart verloren;
+// doppelt Gelesenes verwirft der Server (Kennung je Satz ist eindeutig).
+func (s *auditSammler) sicherePos(pos int64) int64 {
+	for _, sz := range s.offen {
+		if sz.start < pos {
+			pos = sz.start
+		}
+	}
+	for _, o := range s.sudo {
+		if o.start < pos {
+			pos = o.start
+		}
+	}
+	return pos
 }
 
 func neuerAuditSammler() *auditSammler {
@@ -148,8 +168,44 @@ func neuerAuditSammler() *auditSammler {
 // Kern. Ins Journal dagegen kann jeder unter dem Namen sudo schreiben.
 var vertrauteProgramme = map[string]string{"/usr/bin/sudo": "sudo", "/bin/sudo": "sudo", "/usr/bin/su": "su", "/bin/su": "su"}
 
-func (s *auditSammler) benutzerSatz(typ, nummer string, zeit time.Time, rest string) []ereignis.Ereignis {
-	f := felder(strings.ReplaceAll(rest, "'", " "))
+// benutzerFelder trennt einen USER_*-Satz in den Teil vom Kern (pid, uid,
+// auid, ses) und den Text des Programms in msg='...'. Jeder Wert wird nur aus
+// seinem Teil genommen und nur beim ersten Vorkommen: ein zweites exe= im
+// Text kann nichts überschreiben.
+func benutzerFelder(rest string) (kern, text map[string]string, ok bool) {
+	if i := strings.IndexByte(rest, 0x1d); i >= 0 {
+		rest = rest[:i]
+	}
+	i := strings.Index(rest, "msg='")
+	if i < 0 {
+		return nil, nil, false
+	}
+	innen := rest[i+5:]
+	j := strings.LastIndexByte(innen, '\'')
+	if j < 0 {
+		return nil, nil, false
+	}
+	return erstFelder(rest[:i]), erstFelder(innen[:j]), true
+}
+
+func erstFelder(s string) map[string]string {
+	m := map[string]string{}
+	for _, f := range auditFeld.FindAllStringSubmatch(s, -1) {
+		if _, schon := m[f[1]]; !schon {
+			m[f[1]] = f[2]
+		}
+	}
+	return m
+}
+
+func (s *auditSammler) benutzerSatz(typ, nummer string, zeit time.Time, rest string, start int64) []ereignis.Ereignis {
+	k, f, ok := benutzerFelder(rest)
+	if !ok {
+		return nil
+	}
+	for _, n := range []string{"pid", "uid", "auid", "ses"} {
+		f[n] = k[n]
+	}
 	prog := vertrauteProgramme[wert(f["exe"])]
 	if prog == "" {
 		return nil
@@ -174,7 +230,7 @@ func (s *auditSammler) benutzerSatz(typ, nummer string, zeit time.Time, rest str
 		if c := wert(f["cwd"]); c != "" {
 			e.Daten["verzeichnis"] = c
 		}
-		s.sudo[pid] = &sudoOffen{e: e, seit: time.Now()}
+		s.sudo[pid] = &sudoOffen{e: e, seit: time.Now(), start: start}
 	case prog == "sudo" && typ == "USER_START":
 		if o := s.sudo[pid]; o != nil {
 			delete(s.sudo, pid)
@@ -222,7 +278,7 @@ func wert(v string) string {
 	return v
 }
 
-func (s *auditSammler) zeile(z string) []ereignis.Ereignis {
+func (s *auditSammler) zeile(z string, start int64) []ereignis.Ereignis {
 	m := auditKopf.FindStringSubmatch(z)
 	if m == nil {
 		return nil
@@ -233,13 +289,13 @@ func (s *auditSammler) zeile(z string) []ereignis.Ereignis {
 	if sz == nil {
 		sk, _ := strconv.ParseInt(sek, 10, 64)
 		mz, _ := strconv.ParseInt(ms, 10, 64)
-		sz = &auditSatz{zeit: time.Unix(sk, mz*int64(time.Millisecond)), nummer: schl}
+		sz = &auditSatz{zeit: time.Unix(sk, mz*int64(time.Millisecond)), nummer: schl, start: start}
 		s.offen[schl] = sz
 	}
 	sz.zuletzt = time.Now()
 	if strings.HasPrefix(typ, "USER_") {
 		delete(s.offen, schl)
-		return s.benutzerSatz(typ, schl, sz.zeit, rest)
+		return s.benutzerSatz(typ, schl, sz.zeit, rest, start)
 	}
 	f := felder(rest)
 	switch typ {
@@ -286,6 +342,10 @@ func (s *auditSammler) alteAbschliessen() []ereignis.Ereignis {
 
 func (s *auditSammler) alles() []ereignis.Ereignis {
 	var l []ereignis.Ereignis
+	for pid, o := range s.sudo {
+		delete(s.sudo, pid)
+		l = append(l, o.e)
+	}
 	for k, sz := range s.offen {
 		delete(s.offen, k)
 		if e, ok := s.ereignis(sz); ok {
