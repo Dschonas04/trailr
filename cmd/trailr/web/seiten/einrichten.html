@@ -2,6 +2,7 @@
 <h1>Agent einrichten</h1>
 <div class="karte">
 <p>Der Agent ist ein einzelnes Programm. Er liest SSH-Anmeldungen und Sitzungen aus dem Journal und aus auditd sudo, su, ausgeführte Befehle und Änderungen an überwachten Pfaden. Ohne auditd fehlen sudo und su: im Journal könnte sie jeder vortäuschen. Was nicht ankommt, puffert er und schickt es später.</p>
+<p>Ohne Server geht es auch: mit <span class="code">TRAILR_ORDNER=/var/log/trailr</span> legt der Agent die Trails selbst ab, lesen mit <span class="code">trailr-agent zeigen</span>, prüfen mit <span class="code">trailr-agent pruefen</span>.</p>
 <p>Mit Ansible geht es am einfachsten: Rolle <span class="code">agent/ansible/trailr_agent</span>, sie rechnet den Schlüssel je Host selbst aus und prüft die Prüfsumme gegen den Wert in der Rolle.</p>
 <form method="get" action="/einrichten" class="zeile">
   <label>Hostname <input name="host" value="{{.D.Host}}" placeholder="vm-debian-docker" required pattern="[A-Za-z0-9][A-Za-z0-9.\-]{0,62}"></label>

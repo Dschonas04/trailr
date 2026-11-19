@@ -7,6 +7,34 @@ Sitzungen aus dem Journal, Befehle und Dateiänderungen über auditd, Puffer
 auf dem Host, Hash-Kette je Host mit Prüfung, Übersicht, Filter, Sitzungen,
 CSV-Export, Aufbewahrungsfrist. Alarme kommen noch.
 
+## Nur der Agent, ohne Server
+
+Der Agent kann die Trails selbst in einem Ordner ablegen. Dann braucht es
+keinen Server, keine Datenbank und kein Docker: ein Programm, ein
+systemd-Dienst.
+
+```bash
+# /etc/trailr/agent.env
+TRAILR_ORDNER=/var/log/trailr
+TRAILR_ORDNER_TAGE=365          # optional, sonst bleibt alles
+```
+
+Je Tag eine Datei `trail-2026-11-19.jsonl`, eine Zeile je Ereignis, mit
+derselben Hash-Kette wie auf dem Server, über die Tage hinweg verkettet.
+
+```bash
+sudo trailr-agent zeigen                       # die letzten 50
+sudo trailr-agent zeigen -benutzer jonas -art sudo -n 200
+sudo trailr-agent zeigen -tag 2026-11-19
+sudo trailr-agent pruefen                      # Kette nachrechnen
+```
+
+`pruefen` findet geänderte, gelöschte und eingeschobene Einträge. Grenze:
+Wer auf dem Host root ist, kann die ganze Kette neu schreiben. Dagegen hilft
+nur ein zweiter Ort, also der Server; beides zugleich geht auch
+(`TRAILR_ORDNER` und `TRAILR_SERVER` setzen). In der Ansible-Rolle:
+`trailr_ordner: /var/log/trailr`, für ohne Server `trailr_server: ""`.
+
 ## Geplant
 
 * **Agent auf jedem Host** (ein statisches Go-Programm, systemd-Dienst), verteilt per Ansible-Rolle

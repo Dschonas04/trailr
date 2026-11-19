@@ -1,7 +1,7 @@
 ---
 - name: Trailr, Agent laden
   ansible.builtin.get_url:
-    url: "{{ trailr_server }}/agent/trailr-agent"
+    url: "{{ trailr_agent_quelle }}"
     checksum: "sha256:{{ trailr_agent_sha256 }}"
     dest: /usr/local/bin/trailr-agent
     mode: "0755"
@@ -27,9 +27,15 @@
   ansible.builtin.copy:
     dest: /etc/trailr/agent.env
     content: |
-      TRAILR_SERVER={{ trailr_server }}
       TRAILR_HOST={{ inventory_hostname }}
+      {% if trailr_server %}
+      TRAILR_SERVER={{ trailr_server }}
       TRAILR_SCHLUESSEL={{ (trailr_schluessel ~ ':' ~ inventory_hostname) | hash('sha256') }}
+      {% endif %}
+      {% if trailr_ordner %}
+      TRAILR_ORDNER={{ trailr_ordner }}
+      TRAILR_ORDNER_TAGE={{ trailr_ordner_tage }}
+      {% endif %}
     mode: "0600"
   no_log: true
   notify: Trailr neu starten

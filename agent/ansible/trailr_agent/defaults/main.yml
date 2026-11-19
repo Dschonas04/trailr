@@ -1,10 +1,19 @@
 ---
 # Adresse des Trailr-Servers und Agent-Schlüssel (aus dem Vault).
+# Leer lassen, wenn nur in den Ordner geschrieben werden soll.
 trailr_server: "https://10.0.2.7:8400"
 trailr_schluessel: "{{ vault_trailr_agent_schluessel }}"
+# Trails zusätzlich (oder ohne Server: nur) auf dem Host ablegen.
+# Lesen: trailr-agent zeigen, prüfen: trailr-agent pruefen
+trailr_ordner: ""
+# Tagesdateien so viele Tage behalten (0: alle).
+trailr_ordner_tage: 0
 # auditd mit den Regeln für Befehle und Dateien einrichten.
 trailr_auditd: true
 # Prüfsumme des Agenten, hier im Repository festgehalten und nicht vom Server
 # geholt: sonst prüft der Server sich selbst. Nach jeder Änderung am Agenten
 # neu setzen (reproduzierbar: make agent-pruefsumme).
-trailr_agent_sha256: "f9982b9f07c2d1c96fb577bf7bada9229b23555156f114fd8a882c483e3790a7"
+trailr_agent_sha256: "616b31e936a7301d2e644cbe3c333d30f5a6fca6f18203821e337d2da8084791"
+# Woher der Agent kommt: vom Server, oder ohne Server von einer anderen
+# Adresse (etwa einem Release). Geprüft wird immer gegen trailr_agent_sha256.
+trailr_agent_quelle: "{{ trailr_server | default('https://10.0.2.7:8400', true) }}/agent/trailr-agent"

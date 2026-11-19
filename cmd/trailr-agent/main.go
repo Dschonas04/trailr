@@ -1,5 +1,5 @@
-// trailr-agent läuft auf jedem Linux-Host und schickt Benutzeraktionen an den
-// Trailr-Server: Anmeldungen (SSH), sudo, su, Sitzungen aus dem Journal und,
+// trailr-agent läuft auf jedem Linux-Host und hält Benutzeraktionen fest,
+// im eigenen Ordner (TRAILR_ORDNER), beim Trailr-Server oder beides: Anmeldungen (SSH), sudo, su, Sitzungen aus dem Journal und,
 // wenn auditd läuft, ausgeführte Befehle und Änderungen an überwachten Pfaden.
 //
 // Nichts geht verloren, wenn der Server fehlt: jedes Paket landet zuerst in
@@ -34,6 +34,7 @@ type agent struct {
 	server, schluessel, host string
 	dir                      string
 	client                   *http.Client
+	ordner                   *ablage
 
 	mu       sync.Mutex
 	warte    []ereignis.Ereignis
@@ -42,17 +43,38 @@ type agent struct {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "pruefen":
+			os.Exit(befehlPruefen(os.Args[2:], os.Stdout))
+		case "zeigen":
+			os.Exit(befehlZeigen(os.Args[2:], os.Stdout))
+		case "version":
+			fmt.Println(version)
+			return
+		}
+	}
 	server := flag.String("server", os.Getenv("TRAILR_SERVER"), "Adresse des Servers, z. B. https://10.0.2.7:8400")
 	dir := flag.String("stand", umgebung("TRAILR_STAND", "/var/lib/trailr"), "Verzeichnis für Puffer und Lesemarken")
 	audit := flag.String("audit", umgebung("TRAILR_AUDIT_LOG", "/var/log/audit/audit.log"), "auditd-Protokoll")
+	ordner := flag.String("ordner", os.Getenv("TRAILR_ORDNER"), "Trails selbst in diesem Ordner ablegen, z. B. /var/log/trailr")
+	tage := flag.Int("tage", 0, "Tagesdateien im Ordner so viele Tage behalten (0: alle)")
 	flag.Parse()
-	schluessel := os.Getenv("TRAILR_SCHLUESSEL")
-	if *server == "" || schluessel == "" {
-		log.Fatal("TRAILR_SERVER und TRAILR_SCHLUESSEL müssen gesetzt sein")
+	if *tage == 0 {
+		fmt.Sscan(os.Getenv("TRAILR_ORDNER_TAGE"), tage)
 	}
-	// Der Schlüssel geht nie unverschlüsselt über das Netz.
-	if !strings.HasPrefix(*server, "https://") && os.Getenv("TRAILR_UNSICHER") != "1" {
-		log.Fatal("TRAILR_SERVER muss mit https:// beginnen")
+	schluessel := os.Getenv("TRAILR_SCHLUESSEL")
+	if *server == "" && *ordner == "" {
+		log.Fatal("TRAILR_ORDNER (ohne Server) oder TRAILR_SERVER mit TRAILR_SCHLUESSEL setzen")
+	}
+	if *server != "" {
+		if schluessel == "" {
+			log.Fatal("Zu TRAILR_SERVER gehört TRAILR_SCHLUESSEL")
+		}
+		// Der Schlüssel geht nie unverschlüsselt über das Netz.
+		if !strings.HasPrefix(*server, "https://") && os.Getenv("TRAILR_UNSICHER") != "1" {
+			log.Fatal("TRAILR_SERVER muss mit https:// beginnen")
+		}
 	}
 	host, _ := os.Hostname()
 	if h := os.Getenv("TRAILR_HOST"); h != "" {
@@ -63,12 +85,26 @@ func main() {
 	}
 	a := &agent{server: strings.TrimRight(*server, "/"), schluessel: schluessel, host: host, dir: *dir,
 		client: &http.Client{Timeout: 30 * time.Second}}
+	if *ordner != "" {
+		o, err := neueAblage(*ordner, host, *tage)
+		if err != nil {
+			log.Fatalf("Ordner: %v", err)
+		}
+		a.ordner = o
+	}
 	a.journal = a.lesen("journal.cursor")
 	json.Unmarshal([]byte(a.lesen("audit.stand")), &a.auditPos)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	log.Printf("trailr-agent %s auf %s, Server %s", version, host, a.server)
+	ziele := []string{}
+	if a.ordner != nil {
+		ziele = append(ziele, "Ordner "+a.ordner.dir)
+	}
+	if a.server != "" {
+		ziele = append(ziele, "Server "+a.server)
+	}
+	log.Printf("trailr-agent %s auf %s, %s", version, host, strings.Join(ziele, " und "))
 
 	go a.journalLesen(ctx)
 	go a.auditLesen(ctx, *audit)
@@ -145,7 +181,16 @@ func (a *agent) puffern() {
 	a.warte = nil
 	journal, audit := a.journal, a.auditPos
 	a.mu.Unlock()
-	if len(l) > 0 {
+	if a.ordner != nil {
+		if err := a.ordner.ablegen(l); err != nil {
+			log.Printf("Ordner: %v", err)
+			a.mu.Lock()
+			a.warte = append(l, a.warte...)
+			a.mu.Unlock()
+			return
+		}
+	}
+	if len(l) > 0 && a.server != "" {
 		f, err := os.OpenFile(a.puffer(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
 			log.Printf("Puffer: %v", err)
@@ -171,6 +216,9 @@ func (a *agent) puffern() {
 }
 
 func (a *agent) verschicken() error {
+	if a.server == "" {
+		return nil
+	}
 	f, err := os.Open(a.puffer())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
