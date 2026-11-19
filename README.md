@@ -32,7 +32,7 @@ für Befehle und Dateien, auditd mit den Regeln aus `agent/ansible/trailr_agent/
 
 ## Schritte
 
-1. Agent liest das Journal (sshd, sudo, su, systemd-logind) und schickt Ereignisse
+1. Agent liest das Journal (sshd, systemd-logind) und auditd (sudo, su, Befehle, Dateien; dort kann nur schreiben, wer CAP_AUDIT_WRITE hat) und schickt Ereignisse
 2. Server nimmt per mTLS an, speichert mit Hash-Kette
 3. Weboberfläche: Suche und Zeitleiste je Sitzung
 4. auditd-Regeln für Befehle und überwachte Pfade

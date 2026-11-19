@@ -19,12 +19,6 @@ func TestJournalDeuten(t *testing.T) {
 		{"sshd", "Invalid user  from 1.2.3.4 port 22", "anmeldung", "(leer)", false},
 		{"sshd", "Invalid user x from 9.9.9.9 port 1 from 1.2.3.4 port 22", "anmeldung", "x from 9.9.9.9 port 1", false},
 		{"sshd", "Disconnected from user jonas 10.0.0.5 port 50122", "abmeldung", "jonas", true},
-		{"sudo", "   jonas : TTY=pts/0 ; PWD=/home/jonas ; USER=root ; COMMAND=/usr/bin/apt update", "sudo", "jonas", true},
-		{"sudo", "   gast : 3 incorrect password attempts ; TTY=pts/1 ; PWD=/ ; USER=root ; COMMAND=/bin/bash", "sudo", "gast", false},
-		{"sudo", "jonas : TTY=pts/0 ; PWD=/root ; USER=root ; ENV=A=1 ; COMMAND=/usr/bin/id", "sudo", "jonas", true},
-		{"sudo", "  debian : PWD=/home/debian ; USER=root ; COMMAND=/usr/bin/id", "sudo", "debian", true},
-		{"su", "(to root) jonas on pts/2", "su", "jonas", true},
-		{"su", "FAILED SU (to root) gast on pts/3", "su", "gast", false},
 		{"systemd-logind", "New session 42 of user jonas.", "sitzung", "jonas", true},
 		{"systemd-logind", "Removed session 42.", "sitzung", "jonas", true},
 	}
@@ -94,35 +88,43 @@ func TestKette(t *testing.T) {
 	}
 }
 
-func TestNurVonRoot(t *testing.T) {
+func TestJournalOhneSudo(t *testing.T) {
 	z := neuerJournalLeser()
-	gefaelscht := []byte(`{"__CURSOR":"c1","SYSLOG_IDENTIFIER":"sudo","_UID":"1000","__REALTIME_TIMESTAMP":"1","MESSAGE":"root : TTY=pts/0 ; PWD=/ ; USER=root ; COMMAND=/bin/true"}`)
+	// Ins Journal kann jeder als "sudo" schreiben; auch von root zählt es nicht.
+	for _, uid := range []string{"0", "1000"} {
+		z1 := []byte(`{"__CURSOR":"c1","SYSLOG_IDENTIFIER":"sudo","_UID":"` + uid + `","_EXE":"/usr/bin/sudo","__REALTIME_TIMESTAMP":"1","MESSAGE":"root : TTY=pts/0 ; PWD=/ ; USER=root ; COMMAND=/bin/true"}`)
+		if _, _, ok := z.zeile(z1); ok {
+			t.Fatal("sudo aus dem Journal angenommen")
+		}
+	}
+	gefaelscht := []byte(`{"__CURSOR":"c2","SYSLOG_IDENTIFIER":"sshd","_UID":"1000","__REALTIME_TIMESTAMP":"1","MESSAGE":"Accepted publickey for root from 10.0.0.5 port 1 ssh2"}`)
 	if _, _, ok := z.zeile(gefaelscht); ok {
-		t.Fatal("Zeile eines Benutzers als sudo angenommen")
-	}
-	echt := []byte(`{"__CURSOR":"c2","SYSLOG_IDENTIFIER":"sudo","_UID":"0","__REALTIME_TIMESTAMP":"1","MESSAGE":"jonas : TTY=pts/0 ; PWD=/ ; USER=root ; COMMAND=/bin/true"}`)
-	if _, _, ok := z.zeile(echt); !ok {
-		t.Fatal("echte sudo-Zeile verworfen")
+		t.Fatal("sshd-Zeile eines Benutzers angenommen")
 	}
 }
 
-func TestSuVonBenutzer(t *testing.T) {
-	z := neuerJournalLeser()
-	msg := `"(to root) jonas on pts/0"`
-	echt := []byte(`{"__CURSOR":"c3","SYSLOG_IDENTIFIER":"su","_UID":"1000","_EXE":"/usr/bin/su","__REALTIME_TIMESTAMP":"1","MESSAGE":` + msg + `}`)
-	if _, _, ok := z.zeile(echt); !ok {
-		t.Fatal("su-Zeile vom echten su verworfen")
+func TestAuditSudoSu(t *testing.T) {
+	s := neuerAuditSammler()
+	s.namen.m["1000"] = "debian"
+	cmd := "646F636B6572207073" // "docker ps"
+	l := s.zeile(`type=USER_CMD msg=audit(1795067527.074:1): pid=7 uid=1000 auid=1000 ses=850 subj=unconfined msg='cwd="/home/debian" cmd=` + cmd + ` exe="/usr/bin/sudo" terminal=pts/0 res=success'` + "\x1d" + `UID="debian"`)
+	if len(l) != 0 {
+		t.Fatal("sudo zu früh gemeldet")
 	}
-	falsch := []byte(`{"__CURSOR":"c4","SYSLOG_IDENTIFIER":"su","_UID":"1000","_EXE":"/usr/bin/logger","__REALTIME_TIMESTAMP":"1","MESSAGE":` + msg + `}`)
-	if _, _, ok := z.zeile(falsch); ok {
-		t.Fatal("logger -t su angenommen")
+	l = s.zeile(`type=USER_START msg=audit(1795067527.078:2): pid=7 uid=1000 auid=1000 ses=850 subj=unconfined msg='op=PAM:session_open grantors=pam_unix acct="root" exe="/usr/bin/sudo" hostname=? addr=? terminal=pts/0 res=success'`)
+	if len(l) != 1 || l[0].Art != "sudo" || l[0].Benutzer != "debian" || l[0].Als != "root" || l[0].Text != "docker ps" || !l[0].Erfolg {
+		t.Fatalf("sudo: %+v", l)
 	}
-}
-
-func TestSudoVonBenutzer(t *testing.T) {
-	z := neuerJournalLeser()
-	echt := []byte(`{"__CURSOR":"c5","SYSLOG_IDENTIFIER":"sudo","_UID":"1000","_EXE":"/usr/bin/sudo","__REALTIME_TIMESTAMP":"1","MESSAGE":"  debian : PWD=/home/debian ; USER=root ; COMMAND=/bin/true"}`)
-	if _, _, ok := z.zeile(echt); !ok {
-		t.Fatal("sudo-Zeile vom echten sudo verworfen")
+	l = s.zeile(`type=USER_START msg=audit(1795067600.000:3): pid=9 uid=1000 auid=1000 ses=851 subj=unconfined msg='op=PAM:session_open grantors=pam_unix acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/1 res=success'`)
+	if len(l) != 1 || l[0].Art != "su" || l[0].Als != "root" || l[0].Benutzer != "debian" {
+		t.Fatalf("su: %+v", l)
+	}
+	l = s.zeile(`type=USER_AUTH msg=audit(1795067600.100:4): pid=10 uid=1000 auid=1000 ses=851 subj=unconfined msg='op=PAM:authentication grantors=? acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/1 res=failed'`)
+	if len(l) != 1 || l[0].Erfolg {
+		t.Fatalf("su falsch: %+v", l)
+	}
+	// Anderes Programm mit USER_START (etwa cron) zählt nicht.
+	if l = s.zeile(`type=USER_START msg=audit(1795067600.200:5): pid=11 uid=0 auid=0 ses=1 msg='op=PAM:session_open acct="root" exe="/usr/sbin/cron" res=success'`); len(l) != 0 {
+		t.Fatalf("cron gemeldet: %+v", l)
 	}
 }

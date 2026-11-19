@@ -129,10 +129,71 @@ type auditSatz struct {
 type auditSammler struct {
 	offen map[string]*auditSatz
 	namen *namen
+	// sudo meldet erst den Befehl (USER_CMD), dann für wen er läuft
+	// (USER_START); beides kommt vom selben Prozess.
+	sudo map[string]*sudoOffen
+}
+
+type sudoOffen struct {
+	e    ereignis.Ereignis
+	seit time.Time
 }
 
 func neuerAuditSammler() *auditSammler {
-	return &auditSammler{offen: map[string]*auditSatz{}, namen: &namen{m: map[string]string{}}}
+	return &auditSammler{offen: map[string]*auditSatz{}, namen: &namen{m: map[string]string{}}, sudo: map[string]*sudoOffen{}}
+}
+
+// sudo und su kommen aus auditd, nicht aus dem Journal: USER_*-Sätze darf nur
+// schreiben, wer CAP_AUDIT_WRITE hat (sudo, su, sshd), und uid/auid setzt der
+// Kern. Ins Journal dagegen kann jeder unter dem Namen sudo schreiben.
+var vertrauteProgramme = map[string]string{"/usr/bin/sudo": "sudo", "/bin/sudo": "sudo", "/usr/bin/su": "su", "/bin/su": "su"}
+
+func (s *auditSammler) benutzerSatz(typ, nummer string, zeit time.Time, rest string) []ereignis.Ereignis {
+	f := felder(strings.ReplaceAll(rest, "'", " "))
+	prog := vertrauteProgramme[wert(f["exe"])]
+	if prog == "" {
+		return nil
+	}
+	auid := f["auid"]
+	if auid == "" || auid == "4294967295" {
+		auid = f["uid"]
+	}
+	quelle := wert(f["terminal"])
+	if quelle == "?" {
+		quelle = ""
+	}
+	e := ereignis.Ereignis{Kennung: "a:" + nummer, Zeit: zeit, Benutzer: s.namen.von(auid), Sitzung: f["ses"],
+		Quelle: quelle, Erfolg: f["res"] == "success", Art: prog, Daten: map[string]string{"programm": wert(f["exe"])}}
+	if e.Sitzung == "4294967295" {
+		e.Sitzung = ""
+	}
+	pid := f["pid"]
+	switch {
+	case prog == "sudo" && typ == "USER_CMD":
+		e.Text = wert(f["cmd"])
+		if c := wert(f["cwd"]); c != "" {
+			e.Daten["verzeichnis"] = c
+		}
+		s.sudo[pid] = &sudoOffen{e: e, seit: time.Now()}
+	case prog == "sudo" && typ == "USER_START":
+		if o := s.sudo[pid]; o != nil {
+			delete(s.sudo, pid)
+			o.e.Als = wert(f["acct"])
+			return []ereignis.Ereignis{o.e}
+		}
+	case prog == "sudo" && typ == "USER_AUTH" && !e.Erfolg:
+		e.Text = "sudo: Kennwort falsch"
+		return []ereignis.Ereignis{e}
+	case prog == "su" && typ == "USER_START":
+		e.Als = wert(f["acct"])
+		e.Text = "su zu " + e.Als
+		return []ereignis.Ereignis{e}
+	case prog == "su" && typ == "USER_AUTH" && !e.Erfolg:
+		e.Als = wert(f["acct"])
+		e.Text = "su zu " + e.Als + " (Kennwort falsch)"
+		return []ereignis.Ereignis{e}
+	}
+	return nil
 }
 
 func felder(s string) map[string]string {
@@ -176,6 +237,10 @@ func (s *auditSammler) zeile(z string) []ereignis.Ereignis {
 		s.offen[schl] = sz
 	}
 	sz.zuletzt = time.Now()
+	if strings.HasPrefix(typ, "USER_") {
+		delete(s.offen, schl)
+		return s.benutzerSatz(typ, schl, sz.zeit, rest)
+	}
 	f := felder(rest)
 	switch typ {
 	case "SYSCALL":
@@ -201,6 +266,13 @@ func (s *auditSammler) zeile(z string) []ereignis.Ereignis {
 // alteAbschliessen: Sätze ohne EOE, die seit zwei Sekunden ruhen.
 func (s *auditSammler) alteAbschliessen() []ereignis.Ereignis {
 	var l []ereignis.Ereignis
+	// sudo ohne USER_START (etwa abgelehnt): nach zwei Sekunden so melden.
+	for pid, o := range s.sudo {
+		if time.Since(o.seit) > 2*time.Second {
+			delete(s.sudo, pid)
+			l = append(l, o.e)
+		}
+	}
 	for k, sz := range s.offen {
 		if time.Since(sz.zuletzt) > 2*time.Second {
 			delete(s.offen, k)

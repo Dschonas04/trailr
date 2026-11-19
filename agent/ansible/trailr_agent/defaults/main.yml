@@ -7,4 +7,4 @@ trailr_auditd: true
 # Prüfsumme des Agenten, hier im Repository festgehalten und nicht vom Server
 # geholt: sonst prüft der Server sich selbst. Nach jeder Änderung am Agenten
 # neu setzen (reproduzierbar: make agent-pruefsumme).
-trailr_agent_sha256: "8e2d0b0baa79da32f090ebcdf0293afd5acbf9bc8c29abf86e751080a2760e8b"
+trailr_agent_sha256: "65a3ab23a240317862aff1fb2b5d0b7cd89dede5bc6bf0975f27e244e07656bd"
