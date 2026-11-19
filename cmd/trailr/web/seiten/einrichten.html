@@ -2,23 +2,34 @@
 <h1>Agent einrichten</h1>
 <div class="karte">
 <p>Der Agent ist ein einzelnes Programm. Er liest das Journal (SSH, sudo, su, Sitzungen) und, wenn auditd läuft, ausgeführte Befehle und Änderungen an überwachten Pfaden. Was nicht ankommt, puffert er und schickt es später.</p>
-<pre class="code">sudo curl -fsSo /usr/local/bin/trailr-agent {{.D.Server}}/agent/trailr-agent
-sudo chmod 755 /usr/local/bin/trailr-agent
-sudo mkdir -p /etc/trailr
-H=$(hostname)
-K=$(printf '%s' "&lt;Hauptschlüssel&gt;:$H" | sha256sum | cut -d' ' -f1)
-printf 'TRAILR_SERVER={{.D.Server}}\nTRAILR_HOST=%s\nTRAILR_SCHLUESSEL=%s\n' "$H" "$K" | sudo tee /etc/trailr/agent.env &gt;/dev/null
-sudo chmod 600 /etc/trailr/agent.env
+<p>Mit Ansible geht es am einfachsten: Rolle <span class="code">agent/ansible/trailr_agent</span>, sie rechnet den Schlüssel je Host selbst aus und prüft die Prüfsumme gegen den Wert in der Rolle.</p>
+<form method="get" action="/einrichten" class="zeile">
+  <label>Hostname <input name="host" value="{{.D.Host}}" placeholder="vm-debian-docker" required pattern="[A-Za-z0-9][A-Za-z0-9.\-]{0,62}"></label>
+  <button>Befehle für diesen Host</button>
+</form>
+{{with .D.Fehler}}<p class="fehler">{{.}}</p>{{end}}
+</div>
+{{if .D.Schluessel}}
+<div class="karte">
+<p>Auf <b>{{.D.Host}}</b> als root ausführen. Der Schlüssel gilt nur für diesen Host.</p>
+<pre class="code">curl -fsSo /usr/local/bin/trailr-agent {{.D.Server}}/agent/trailr-agent
+echo "&lt;Prüfsumme aus agent/ansible/trailr_agent/defaults/main.yml&gt;  /usr/local/bin/trailr-agent" | sha256sum -c
+chmod 755 /usr/local/bin/trailr-agent
+useradd --system --no-create-home --shell /usr/sbin/nologin --groups systemd-journal trailr
+install -d -m 700 /etc/trailr
+umask 077
+printf 'TRAILR_SERVER={{.D.Server}}\nTRAILR_HOST={{.D.Host}}\nTRAILR_SCHLUESSEL={{.D.Schluessel}}\n' &gt; /etc/trailr/agent.env
 
 # Befehle und Dateien (optional): auditd mit den Regeln aus dem Repository
-sudo apt install -y auditd
-sudo cp agent/ansible/trailr_agent/files/audit.rules /etc/audit/rules.d/trailr.rules
-sudo augenrules --load
+apt install -y auditd
+cp agent/ansible/trailr_agent/files/audit.rules /etc/audit/rules.d/trailr.rules
+augenrules --load
 
 # Dienst
-sudo cp agent/ansible/trailr_agent/files/trailr-agent.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now trailr-agent</pre>
-<p class="muted klein">Jeder Host liefert mit einem eigenen Schlüssel: SHA-256 aus Hauptschlüssel (TRAILR_AGENT_SCHLUESSEL in der .env des Servers), Doppelpunkt und Hostname. Die Ansible-Rolle rechnet ihn selbst aus. Die Prüfsumme des Agenten steht unter <span class="code">/agent/trailr-agent.sha256</span>. Regeln und Dienst liegen im Repository in der Ansible-Rolle unter <span class="code">agent/ansible/trailr_agent/files</span>. Ereignisse werden {{.D.Tage}} Tage aufbewahrt.</p>
+cp agent/ansible/trailr_agent/files/trailr-agent.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now trailr-agent</pre>
 </div>
+{{end}}
+<p class="muted klein">Die Prüfsumme bitte aus dem Repository nehmen, nicht von diesem Server: sonst prüft der Server sich selbst. Der Agent läuft als eigener Benutzer <span class="code">trailr</span> und darf nur lesen. Ereignisse werden {{.D.Tage}} Tage aufbewahrt.</p>
 {{end}}

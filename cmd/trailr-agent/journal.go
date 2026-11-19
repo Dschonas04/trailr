@@ -109,23 +109,33 @@ func nachricht(roh json.RawMessage) string {
 	return ""
 }
 
+// su und sudo laufen mit der echten UID dessen, der sie aufruft; das Journal
+// trägt dann dessen UID ein. Echt ist die Zeile trotzdem, wenn sie vom
+// installierten Programm kommt: _EXE stammt wie _UID vom Journal, nicht vom
+// Absender, und nach /usr/bin schreibt nur root.
+var vertraut = map[string]map[string]bool{
+	"su":   {"/usr/bin/su": true, "/bin/su": true},
+	"sudo": {"/usr/bin/sudo": true, "/bin/sudo": true},
+}
+
 func (z *journalLeser) zeile(roh []byte) (ereignis.Ereignis, string, bool) {
 	var f map[string]json.RawMessage
 	if json.Unmarshal(roh, &f) != nil {
 		return ereignis.Ereignis{}, "", false
 	}
-	var cursor, ident, zeit, uid string
+	var cursor, ident, zeit, uid, exe string
 	json.Unmarshal(f["__CURSOR"], &cursor)
 	// _UID setzt das Journal selbst, nicht der Absender: nur Zeilen von root
 	// zählen. Sonst könnte jeder mit logger -t sudo etwas vortäuschen.
 	json.Unmarshal(f["_UID"], &uid)
+	json.Unmarshal(f["_EXE"], &exe)
 	json.Unmarshal(f["SYSLOG_IDENTIFIER"], &ident)
 	json.Unmarshal(f["__REALTIME_TIMESTAMP"], &zeit)
 	us, _ := strconv.ParseInt(zeit, 10, 64)
 	msg := nachricht(f["MESSAGE"])
 	h := sha256.Sum256([]byte(cursor))
 	e := ereignis.Ereignis{Kennung: "j:" + hex.EncodeToString(h[:12]), Zeit: time.UnixMicro(us), Erfolg: true}
-	if uid != "0" {
+	if uid != "0" && !vertraut[ident][exe] {
 		return e, cursor, false
 	}
 	ok := z.deuten(ident, msg, &e)

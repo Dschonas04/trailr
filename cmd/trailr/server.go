@@ -413,9 +413,19 @@ func (a *App) einrichten(w http.ResponseWriter, r *http.Request) {
 	if ssoSicher(r) {
 		schema = "https"
 	}
-	a.v.zeigen(w, r, "einrichten", a.daten(r, "Agent einrichten", "einrichten", map[string]any{
-		"Server": schema + "://" + r.Host, "Tage": a.tage,
-	}))
+	// Der Schlüssel eines Hosts wird hier ausgerechnet: der Hauptschlüssel
+	// bleibt auf dem Server und muss nie auf einem Host getippt werden.
+	host := strings.TrimSpace(r.URL.Query().Get("host"))
+	d := map[string]any{"Server": schema + "://" + r.Host, "Tage": a.tage, "Host": host}
+	if host != "" {
+		if hostMuster.MatchString(host) {
+			d["Schluessel"] = hostSchluessel(a.schluessel, host)
+		} else {
+			d["Fehler"] = "Hostname ungültig: Buchstaben, Ziffern, Punkt und Strich"
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	a.v.zeigen(w, r, "einrichten", a.daten(r, "Agent einrichten", "einrichten", d))
 }
 
 var _ = pgx.ErrNoRows

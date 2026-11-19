@@ -105,3 +105,24 @@ func TestNurVonRoot(t *testing.T) {
 		t.Fatal("echte sudo-Zeile verworfen")
 	}
 }
+
+func TestSuVonBenutzer(t *testing.T) {
+	z := neuerJournalLeser()
+	msg := `"(to root) jonas on pts/0"`
+	echt := []byte(`{"__CURSOR":"c3","SYSLOG_IDENTIFIER":"su","_UID":"1000","_EXE":"/usr/bin/su","__REALTIME_TIMESTAMP":"1","MESSAGE":` + msg + `}`)
+	if _, _, ok := z.zeile(echt); !ok {
+		t.Fatal("su-Zeile vom echten su verworfen")
+	}
+	falsch := []byte(`{"__CURSOR":"c4","SYSLOG_IDENTIFIER":"su","_UID":"1000","_EXE":"/usr/bin/logger","__REALTIME_TIMESTAMP":"1","MESSAGE":` + msg + `}`)
+	if _, _, ok := z.zeile(falsch); ok {
+		t.Fatal("logger -t su angenommen")
+	}
+}
+
+func TestSudoVonBenutzer(t *testing.T) {
+	z := neuerJournalLeser()
+	echt := []byte(`{"__CURSOR":"c5","SYSLOG_IDENTIFIER":"sudo","_UID":"1000","_EXE":"/usr/bin/sudo","__REALTIME_TIMESTAMP":"1","MESSAGE":"  debian : PWD=/home/debian ; USER=root ; COMMAND=/bin/true"}`)
+	if _, _, ok := z.zeile(echt); !ok {
+		t.Fatal("sudo-Zeile vom echten sudo verworfen")
+	}
+}

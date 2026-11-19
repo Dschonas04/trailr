@@ -2,11 +2,20 @@
 - name: Trailr, Agent laden
   ansible.builtin.get_url:
     url: "{{ trailr_server }}/agent/trailr-agent"
-    checksum: "sha256:{{ trailr_server }}/agent/trailr-agent.sha256"
+    checksum: "sha256:{{ trailr_agent_sha256 }}"
     dest: /usr/local/bin/trailr-agent
     mode: "0755"
     force: true
   notify: Trailr neu starten
+
+- name: Trailr, Benutzer für den Agenten
+  ansible.builtin.user:
+    name: trailr
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    groups: systemd-journal
+    append: true
 
 - name: Trailr, Verzeichnis für Einstellungen
   ansible.builtin.file:
