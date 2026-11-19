@@ -66,6 +66,9 @@ func TestSichtbar(t *testing.T) {
 	if g := sichtbar("ls\x1b[2J\u202eabc\u009b"); g != `ls\x1b[2J\u202eabc\x9b` {
 		t.Fatalf("%q", g)
 	}
+	if g := sichtbar("a\u061cb\u2028c\u200bd\U000E0041"); g != `a\u061cb\u2028c\u200bd\ue0041` {
+		t.Fatalf("%q", g)
+	}
 }
 
 func TestHalbeZeileUndKaputteMitte(t *testing.T) {

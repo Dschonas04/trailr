@@ -21,6 +21,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"trailr/internal/ereignis"
@@ -314,11 +315,13 @@ func sichtbar(s string) string {
 		switch {
 		case r == utf8.RuneError:
 			b.WriteString(`\ufffd`)
-		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
-			fmt.Fprintf(&b, `\x%02x`, r)
 		case r == '\t':
 			b.WriteByte(' ')
-		case (r >= 0x200e && r <= 0x200f) || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069):
+		case r < 0x100 && unicode.Is(unicode.Cc, r):
+			fmt.Fprintf(&b, `\x%02x`, r)
+		// Alle Steuer- und Formatzeichen nach Unicode-Kategorie, dazu Zeilen-
+		// und Absatztrenner: keine handverlesene Liste, die etwas vergisst.
+		case unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp):
 			fmt.Fprintf(&b, `\u%04x`, r)
 		default:
 			b.WriteRune(r)

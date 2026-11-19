@@ -13,7 +13,7 @@ trailr_auditd: true
 # Prüfsumme des Agenten, hier im Repository festgehalten und nicht vom Server
 # geholt: sonst prüft der Server sich selbst. Nach jeder Änderung am Agenten
 # neu setzen (reproduzierbar: make agent-pruefsumme).
-trailr_agent_sha256: "5319e7a7f1a668faef3babe55b7bc136216530ab77e8b0998214b75a39989a64"
+trailr_agent_sha256: "62db9b6bf2acfd15bc0e0528c9b619858b1dca5abbb4d0d837e5fdaffaf5b4d2"
 # Woher der Agent kommt: vom Server, oder ohne Server von einer anderen
 # Adresse (etwa einem Release). Geprüft wird immer gegen trailr_agent_sha256.
 trailr_agent_quelle: "{{ trailr_server | default('https://10.0.2.7:8400', true) }}/agent/trailr-agent"
