@@ -8,17 +8,20 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"trailr/internal/ereignis"
 )
@@ -54,16 +57,43 @@ func neueAblage(dir, host string, tage int) (*ablage, error) {
 	if l := trailDateien(dir); len(l) > 0 {
 		neueste := l[len(l)-1]
 		o.tag = strings.TrimSuffix(strings.TrimPrefix(filepath.Base(neueste), "trail-"), ".jsonl")
-		err := zeilenLesen(neueste, func(z Zeile) error {
-			o.letzter = z.Hash
-			o.gesehen[z.Kennung] = true
-			return nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", neueste, err)
-		}
+		o.einlesen(neueste)
 	}
 	return o, nil
+}
+
+// einlesen holt Hash und Kennungen aus der neuesten Datei. Eine halbe letzte
+// Zeile (Absturz beim Schreiben) wird abgeschnitten; eine kaputte Zeile
+// mittendrin bleibt stehen, damit pruefen sie zeigt, und die Kette geht ab
+// dem letzten lesbaren Eintrag weiter. Aufhören zu protokollieren ist nie
+// die Antwort.
+func (o *ablage) einlesen(pfad string) {
+	b, err := os.ReadFile(pfad)
+	if err != nil {
+		log.Printf("Ordner: %s nicht lesbar (%v), Kette beginnt neu", pfad, err)
+		return
+	}
+	gut := 0
+	for gut < len(b) {
+		ende := bytes.IndexByte(b[gut:], '\n')
+		if ende < 0 {
+			log.Printf("Ordner: halbe letzte Zeile in %s abgeschnitten", pfad)
+			os.Truncate(pfad, int64(gut))
+			return
+		}
+		zeile := b[gut : gut+ende]
+		gut += ende + 1
+		if len(bytes.TrimSpace(zeile)) == 0 {
+			continue
+		}
+		var z Zeile
+		if json.Unmarshal(zeile, &z) != nil || z.Hash == "" {
+			log.Printf("Ordner: unlesbare Zeile in %s, pruefen wird sie melden", pfad)
+			continue
+		}
+		o.letzter = z.Hash
+		o.gesehen[z.Kennung] = true
+	}
 }
 
 func zeilenLesen(pfad string, f func(Zeile) error) error {
@@ -107,6 +137,20 @@ func (o *ablage) ablegen(l []ereignis.Ereignis) error {
 	if err != nil {
 		return err
 	}
+	// Geht unterwegs etwas schief, kommt die Datei auf den alten Stand
+	// zurück: keine halben Zeilen, keine Einträge ohne Nachfolger in der
+	// Kette, und beim nächsten Versuch passt alles wieder zusammen.
+	var anfang int64
+	if st, err := f.Stat(); err == nil {
+		anfang = st.Size()
+	}
+	fertig := false
+	defer func() {
+		if !fertig {
+			f.Truncate(anfang)
+			f.Close()
+		}
+	}()
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)
 	letzter := o.letzter
@@ -120,20 +164,18 @@ func (o *ablage) ablegen(l []ereignis.Ereignis) error {
 		z := Zeile{Ereignis: e, Host: o.host, Vorher: letzter}
 		z.Hash = ereignis.Hash(letzter, e)
 		if err := enc.Encode(z); err != nil {
-			f.Close()
 			return err
 		}
 		letzter = z.Hash
 		neu = append(neu, e.Kennung)
 	}
 	if err := w.Flush(); err != nil {
-		f.Close()
 		return err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
 		return err
 	}
+	fertig = true
 	if err := f.Close(); err != nil {
 		return err
 	}
@@ -252,12 +294,35 @@ func befehlZeigen(args []string, aus io.Writer) int {
 		if !z.Erfolg {
 			ok = "NEIN"
 		}
-		text := strings.ReplaceAll(z.Text, "\n", " ")
+		text := []rune(sichtbar(z.Text))
 		if len(text) > 120 {
-			text = text[:120] + "…"
+			text = append(text[:120], '…')
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", z.Zeit.Local().Format("02.01. 15:04:05"), z.Art, z.Benutzer, z.Als, z.Quelle, ok, text)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", z.Zeit.Local().Format("02.01. 15:04:05"),
+			sichtbar(z.Art), sichtbar(z.Benutzer), sichtbar(z.Als), sichtbar(z.Quelle), ok, string(text))
 	}
 	tw.Flush()
 	return 0
+}
+
+// sichtbar macht Steuerzeichen sichtbar: ein Befehl mit Escape-Folgen soll
+// das Terminal beim Anzeigen nicht umfärben, Zeilen löschen oder Text
+// umdrehen (Bidi), sondern als \x1b dastehen.
+func sichtbar(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == utf8.RuneError:
+			b.WriteString(`\ufffd`)
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
+			fmt.Fprintf(&b, `\x%02x`, r)
+		case r == '\t':
+			b.WriteByte(' ')
+		case (r >= 0x200e && r <= 0x200f) || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069):
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

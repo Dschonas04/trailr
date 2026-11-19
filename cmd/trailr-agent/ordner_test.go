@@ -61,3 +61,36 @@ func TestOrdnerAufraeumen(t *testing.T) {
 		t.Fatal("alte Datei nicht aufgeräumt")
 	}
 }
+
+func TestSichtbar(t *testing.T) {
+	if g := sichtbar("ls\x1b[2J\u202eabc\u009b"); g != `ls\x1b[2J\u202eabc\x9b` {
+		t.Fatalf("%q", g)
+	}
+}
+
+func TestHalbeZeileUndKaputteMitte(t *testing.T) {
+	dir := t.TempDir()
+	o, _ := neueAblage(dir, "test", 0)
+	o.ablegen([]ereignis.Ereignis{{Kennung: "a", Zeit: time.Now(), Art: "su", Benutzer: "x"}})
+	d := trailDateien(dir)[0]
+	f, _ := os.OpenFile(d, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString(`{"kennung":"halb","ha`)
+	f.Close()
+	o2, err := neueAblage(dir, "test", 0)
+	if err != nil || o2.letzter != o.letzter {
+		t.Fatalf("Neustart nach halber Zeile: %v", err)
+	}
+	o2.ablegen([]ereignis.Ereignis{{Kennung: "b", Zeit: time.Now(), Art: "su", Benutzer: "y"}})
+	if p := kettePruefen(dir); p.Bruch != "" || p.Zeilen != 2 {
+		t.Fatalf("%+v", p)
+	}
+	// Kaputte Zeile mittendrin: Agent läuft weiter, pruefen meldet sie.
+	b, _ := os.ReadFile(d)
+	os.WriteFile(d, append([]byte("kaputt\n"), b...), 0o600)
+	if _, err := neueAblage(dir, "test", 0); err != nil {
+		t.Fatal("Agent bricht ab")
+	}
+	if p := kettePruefen(dir); p.Bruch == "" {
+		t.Fatal("kaputte Zeile nicht gemeldet")
+	}
+}
