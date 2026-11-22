@@ -350,6 +350,7 @@ func (s *SSO) kontoSpeichern(w http.ResponseWriter, r *http.Request) {
 	ich, vorher := s.Wer(r)
 	neu := ssoKonto{Name: name, Hash: ssoPasswortHash(passwort)}
 	s.mu.Lock()
+	einrichtung := !vorher && !s.notaus && len(s.konten) == 0
 	ersetzt := false
 	for i := range s.konten {
 		if s.konten[i].Name == name {
@@ -365,6 +366,11 @@ func (s *SSO) kontoSpeichern(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.kontenZeigen(w, r, "Nicht gespeichert: "+err.Error(), false)
 		return
+	}
+	if einrichtung && s.ErstesKonto != nil {
+		if err := s.ErstesKonto(r.Context(), "konto:"+name, name); err != nil {
+			log.Printf("sso: erstes Konto ohne Verwaltungsrecht: %v", err)
+		}
 	}
 	log.Printf("sso: Konto %q %s", name, map[bool]string{true: "neues Passwort", false: "angelegt"}[ersetzt])
 	// Wer bisher ohne Anmeldung hier war (erstes Konto) oder sein eigenes

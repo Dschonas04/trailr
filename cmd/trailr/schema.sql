@@ -31,9 +31,8 @@ CREATE INDEX IF NOT EXISTS ereignisse_host_zeit ON ereignisse(host, zeit DESC);
 CREATE INDEX IF NOT EXISTS ereignisse_benutzer_zeit ON ereignisse(benutzer, zeit DESC);
 CREATE INDEX IF NOT EXISTS ereignisse_zeit ON ereignisse(zeit DESC);
 
--- Wer die App verwaltet. Die erste angemeldete Person trägt sich ein.
+-- Wer die App eingerichtet hat und verwaltet. Dazu kommt TRAILR_ADMIN.
 CREATE TABLE IF NOT EXISTS admins (
 	kennung text PRIMARY KEY,
-	erster  boolean UNIQUE,
 	seit    timestamptz NOT NULL DEFAULT now()
 );

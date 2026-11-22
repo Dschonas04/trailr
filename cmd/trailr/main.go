@@ -21,6 +21,7 @@ import (
 )
 
 type App struct {
+	admins     []string // Vorgabe des Betreibers
 	db         *pgxpool.Pool
 	sso        *SSO
 	v          Vorlagen
@@ -46,6 +47,8 @@ func main() {
 	}
 	// Agenten liefern mit eigenem Schlüssel, ohne Sitzung; das Programm des
 	// Agenten ist kein Geheimnis.
+	a.admins = adminListe(umgebung("TRAILR_ADMIN", ""))
+	a.sso.ErstesKonto = a.ersterAdmin
 	a.sso.Frei = []string{"/statisch/", "/healthz", "/api/lieferung", "/agent/"}
 	go a.aufraeumen(ctx)
 

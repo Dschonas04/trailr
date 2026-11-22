@@ -1,13 +1,27 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"slices"
+	"strings"
 )
 
-// istAdmin: Die erste Person, die sich anmeldet, verwaltet die App (wie in
-// Ticketr). Anmeldung, Konten und Verwaltung sind für alle anderen zu. Im
-// Notaus ist die Sperre ohnehin offen.
+// adminListe liest die Vorgabe des Betreibers: Kennungen mit Komma getrennt,
+// konto:<name> oder oidc:<Aussteller>|<sub>.
+func adminListe(s string) []string {
+	var l []string
+	for _, e := range strings.Split(s, ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			l = append(l, e)
+		}
+	}
+	return l
+}
+
+// istAdmin liest nur. Admin ist, wen der Betreiber vorgibt oder wer die App mit
+// dem Code aus dem Log eingerichtet hat. Im Notaus ist die Sperre ohnehin offen.
 func (a *App) istAdmin(r *http.Request) bool {
 	if a.sso.notaus {
 		return true
@@ -16,23 +30,21 @@ func (a *App) istAdmin(r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	kennung := n.Kennung
-	if kennung == "" {
-		kennung = "lokal:" + n.Nutzer
-	}
-	// erster ist eindeutig: melden sich zwei zugleich an, gewinnt eine Person.
-	if _, err := a.db.Exec(r.Context(), `INSERT INTO admins (kennung, erster)
-		SELECT $1, true WHERE NOT EXISTS (SELECT 1 FROM admins)
-		ON CONFLICT DO NOTHING`, kennung); err != nil {
-		log.Printf("admins: %v", err)
-		return false
+	if slices.Contains(a.admins, n.Kennung) {
+		return true
 	}
 	var ja bool
-	if err := a.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM admins WHERE kennung = $1)`, kennung).Scan(&ja); err != nil {
+	if err := a.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM admins WHERE kennung = $1)`, n.Kennung).Scan(&ja); err != nil {
 		log.Printf("admins: %v", err)
 		return false
 	}
 	return ja
+}
+
+// ersterAdmin läuft, wenn mit dem Einrichtungscode das erste Konto entsteht.
+func (a *App) ersterAdmin(ctx context.Context, kennung, _ string) error {
+	_, err := a.db.Exec(ctx, `INSERT INTO admins (kennung) VALUES ($1) ON CONFLICT DO NOTHING`, kennung)
+	return err
 }
 
 // nurAdmin schützt die Verwaltung der App.

@@ -41,6 +41,7 @@ func TestVerwaltungNurAdmins(t *testing.T) {
 		a.sso.lokalAnmelden(w, httptest.NewRequest("POST", "/", nil), k)
 		return append(w.Result().Cookies(), &http.Cookie{Name: "formular", Value: strings.Repeat("a", 32)})
 	}
+	a.admins = []string{"konto:chefin"}
 	chefin, mitglied := anmelden("chefin"), anmelden("mitglied")
 	ruf := func(kekse []*http.Cookie, methode, pfad string, f url.Values) int {
 		r := httptest.NewRequest(methode, pfad, strings.NewReader(f.Encode()))
@@ -56,9 +57,9 @@ func TestVerwaltungNurAdmins(t *testing.T) {
 		return w.Code
 	}
 
-	// Wer zuerst kommt, verwaltet.
+	// Vom Betreiber vorgegeben.
 	if code := ruf(chefin, "GET", "/sso/konten", nil); code != http.StatusOK {
-		t.Fatalf("erste Person sieht die Konten nicht: %d", code)
+		t.Fatalf("Admin sieht die Konten nicht: %d", code)
 	}
 	vorher, _ := a.sso.konto("chefin")
 	token := strings.Repeat("a", 32)

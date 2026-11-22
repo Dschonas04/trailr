@@ -78,8 +78,10 @@ type ssoKonto struct {
 
 // SSO hält Einstellung und Sitzungsschlüssel einer App.
 type SSO struct {
-	App   string // Anzeigename, z. B. "Foodr"
-	datei string
+	// ErstesKonto läuft, wenn mit dem Einrichtungscode das erste Konto entsteht.
+	ErstesKonto func(ctx context.Context, kennung, name string) error
+	App         string // Anzeigename, z. B. "Foodr"
+	datei       string
 	// Schalter aus der Umgebung, siehe oben.
 	notaus bool
 	// Sperre: true = ohne Anmeldung kommt bei aktivem SSO niemand herein.
@@ -282,6 +284,7 @@ func (s *SSO) Wer(r *http.Request) (SSONutzer, bool) {
 	// demselben Passwort gibt: Löschen oder ein neues Passwort beendet sie.
 	if n.Lokal {
 		if s.kontoStandPasst(n.Nutzer, n.Stand) {
+			n.Kennung = "konto:" + n.Nutzer
 			return n.SSONutzer, true
 		}
 		return SSONutzer{}, false
@@ -296,6 +299,9 @@ func (s *SSO) Wer(r *http.Request) (SSONutzer, bool) {
 	if n.Aussteller != k.Aussteller || n.ClientID != k.ClientID || !ssoErlaubt(k.Erlaubt, n.SSONutzer) {
 		return SSONutzer{}, false
 	}
+	// Nach außen trägt die Kennung ihre Herkunft: ein sub kann sich so weder als
+	// eigenes Konto noch als Person eines anderen Anbieters ausgeben.
+	n.Kennung = "oidc:" + n.Aussteller + "|" + n.Kennung
 	return n.SSONutzer, true
 }
 
