@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"mime"
@@ -29,7 +30,7 @@ func neuerMailer() *Mailer {
 	return m
 }
 
-func (m *Mailer) senden(an, betreff, text string) error {
+func (m *Mailer) senden(ctx context.Context, an, betreff, text string) error {
 	if strings.ContainsAny(an, "\r\n") || strings.ContainsAny(betreff, "\r\n") {
 		return fmt.Errorf("ungültige Adresse oder Betreff")
 	}
@@ -48,12 +49,16 @@ func (m *Mailer) senden(an, betreff, text string) error {
 		"MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" +
 		strings.ReplaceAll(text, "\n", "\r\n") + "\r\n"
 	// Von Hand statt smtp.SendMail: das hat keine Zeitgrenze.
-	verbindung, err := net.DialTimeout("tcp", m.server, 15*time.Second)
+	verbindung, err := (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, "tcp", m.server)
 	if err != nil {
 		return err
 	}
 	defer verbindung.Close()
-	if err := verbindung.SetDeadline(time.Now().Add(time.Minute)); err != nil {
+	bis := time.Now().Add(time.Minute)
+	if d, ok := ctx.Deadline(); ok && d.Before(bis) {
+		bis = d
+	}
+	if err := verbindung.SetDeadline(bis); err != nil {
 		return err
 	}
 	c, err := smtp.NewClient(verbindung, host)

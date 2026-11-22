@@ -27,6 +27,10 @@ const (
 	fehlMuster        = 100  // so viele Muster von Fehlschlägen je Lieferung werden gezählt
 	meldungMax        = 3500 // Telegram nimmt 4096 Zeichen
 	wegPause          = 5 * time.Minute
+	quellenMax        = 50 // so viele neue Quellen meldet eine Lieferung einzeln
+	sammelFrist       = 15 * time.Second
+	einzelFrist       = 10 * time.Second
+	schubFrist        = 2 * time.Minute
 	stilleNach        = 30 * time.Minute
 )
 
@@ -59,8 +63,8 @@ func neueAlarme() *Alarme {
 		al.melder = append(al.melder, melder{"Telegram", telegram("https://api.telegram.org", token, chat)})
 	}
 	if m, an := neuerMailer(), umgebung("TRAILR_ALARM_AN", ""); m != nil && an != "" {
-		al.melder = append(al.melder, melder{"Mail", func(_ context.Context, text string) error {
-			return m.senden(an, "Trailr: Alarm", text)
+		al.melder = append(al.melder, melder{"Mail", func(ctx context.Context, text string) error {
+			return m.senden(ctx, an, "Trailr: Alarm", text)
 		}})
 	}
 	return al
@@ -122,6 +126,7 @@ func eineZeile(s string, n int) string {
 func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, l []ereignis.Ereignis) error {
 	erledigt := map[string]bool{}
 	gezaehlt, geflutet := 0, false
+	quellen := 0
 	for _, e := range l {
 		if time.Since(e.Zeit) > 24*time.Hour {
 			continue // Nachlieferungen von gestern alarmieren nicht mehr
@@ -179,6 +184,15 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 				return err
 			}
 			if frueher && !bekannt {
+				if quellen++; quellen > quellenMax {
+					if quellen == quellenMax+1 {
+						if err := alarmAnlegen(ctx, tx, host, "flut", "quellen:"+strconv.FormatInt(time.Now().Unix()/3600, 10),
+							fmt.Sprintf("Anmeldungen aus mehr als %d neuen Quellen auf einmal", quellenMax)); err != nil {
+							return err
+						}
+					}
+					continue
+				}
 				if err := alarmAnlegen(ctx, tx, host, "quelle", k, "Anmeldung von "+e.Benutzer+" aus neuer Quelle "+e.Quelle); err != nil {
 					return err
 				}
@@ -253,7 +267,8 @@ func (a *App) alarmeSenden(ctx context.Context) {
 
 // alarmeUeber schickt einen Schub. Wichtiges (Kette, Stille, Flut) und übriges
 // wechseln sich ab, Wichtiges zuerst: so hat beides immer Plätze. Darin geht es
-// reihum je Host, und was schon scheiterte, rückt nur in seiner Klasse nach hinten.
+// reihum je Host, für Neues und für Gescheitertes getrennt: eine Flut nimmt
+// einem Nachzügler so weder bei anderen Hosts noch beim eigenen den Platz.
 func (a *App) alarmeUeber(ctx context.Context, m melder) error {
 	pause := a.alarme.aussetzer[m.name]
 	if time.Now().Before(pause.bis) {
@@ -267,11 +282,11 @@ func (a *App) alarmeUeber(ctx context.Context, m melder) error {
 			SELECT host, max(gesendet) AS wann FROM alarme WHERE zeit > $1 GROUP BY host
 		), gereiht AS (
 			SELECT o.*, z.wann,
-			       row_number() OVER (PARTITION BY o.wichtig, o.host ORDER BY o.versucht NULLS FIRST, o.id) AS reihum
+			       row_number() OVER (PARTITION BY o.wichtig, o.host, o.versucht IS NULL ORDER BY o.versucht, o.id) AS reihum
 			FROM offen o JOIN zuletzt z USING (host)
 		)
 		SELECT id, host, text FROM (
-			SELECT *, row_number() OVER (PARTITION BY wichtig ORDER BY versucht NULLS FIRST, reihum, wann NULLS FIRST, id) AS platz
+			SELECT *, row_number() OVER (PARTITION BY wichtig ORDER BY reihum, versucht NULLS FIRST, wann NULLS FIRST, id) AS platz
 			FROM gereiht
 		) x ORDER BY platz, wichtig DESC LIMIT 20`, a.alarme.seit, m.name)
 	if err != nil {
@@ -300,10 +315,17 @@ func (a *App) alarmeUeber(ctx context.Context, m melder) error {
 		return err
 	}
 
-	frist, ende := context.WithTimeout(ctx, time.Minute)
+	frist, ende := context.WithTimeout(ctx, schubFrist)
 	defer ende()
+	// Jeder Versuch mit eigener Frist: ein Hänger lässt Zeit für die übrigen.
 	senden := func(z ...string) error {
-		return m.senden(frist, "Trailr\n"+strings.Join(z, "\n"))
+		dauer := sammelFrist
+		if len(z) == 1 {
+			dauer = einzelFrist
+		}
+		einmal, ab := context.WithTimeout(frist, dauer)
+		defer ab()
+		return m.senden(einmal, "Trailr\n"+strings.Join(z, "\n"))
 	}
 	raus, gescheitert := ids, []int64(nil)
 	fehler := senden(zeilen...)
