@@ -2,7 +2,7 @@
 
 ## Unveröffentlicht
 
-- Sicherheit: Viele Anmeldungen eines Kontos verdecken keine eines anderen, root wird immer einzeln gemeldet.
+- Sicherheit: Viele Anmeldungen eines Kontos verdecken keine eines anderen, root hat einen eigenen Anteil. Je Host und Stunde gibt es feste Grenzen.
 - Sicherheit: Gescheiterte Alarme verhungern nicht hinter einer Flut, ein hängender Versand blockiert nicht.
 - Sicherheit: Eine abgelehnte Meldung hält keine andere auf, Wichtiges behält seinen Vorrang, CSV ohne Steuerzeichen.
 - Sicherheit: CSV immer in Anführung und ohne Formeln, eine Flut verdeckt keine Alarme und keinen anderen Host, jeder Meldeweg für sich.

@@ -27,7 +27,10 @@ const (
 	fehlMuster        = 100  // so viele Muster von Fehlschlägen je Lieferung werden gezählt
 	meldungMax        = 3500 // Telegram nimmt 4096 Zeichen
 	wegPause          = 5 * time.Minute
-	quellenMax        = 50 // so viele neue Quellen meldet eine Lieferung je Konto einzeln, root immer
+	quellenMax        = 50  // so viele neue Quellen meldet eine Lieferung je Konto einzeln
+	quellenHostMax    = 200 // je Host und Stunde, alle Konten außer root
+	quellenRootMax    = 100 // je Host und Stunde, nur root: den Anteil nimmt ihm keiner
+	flutMax           = 5   // je Host und Stunde, danach ein Sammelalarm
 	sammelFrist       = 15 * time.Second
 	einzelFrist       = 10 * time.Second
 	schubFrist        = 2 * time.Minute
@@ -127,6 +130,9 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 	erledigt := map[string]bool{}
 	gezaehlt, geflutet := 0, false
 	quellen := map[string]int{}
+	gemeldetesKonto := map[string]bool{}
+	var andere, root int
+	gelesen := false
 	for _, e := range l {
 		if time.Since(e.Zeit) > 24*time.Hour {
 			continue // Nachlieferungen von gestern alarmieren nicht mehr
@@ -185,12 +191,29 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 				return err
 			}
 			if frueher && !bekannt {
-				quellen[e.Benutzer]++
-				if n := quellen[e.Benutzer]; n > quellenMax && e.Benutzer != "root" {
-					if n == quellenMax+1 {
-						// Je Konto und Lieferung: auch die zweite Flut einer Stunde fällt auf.
-						if err := alarmAnlegen(ctx, tx, host, "flut", "quellen:"+e.Kennung,
-							fmt.Sprintf("Anmeldungen von %s aus mehr als %d neuen Quellen auf einmal", e.Benutzer, quellenMax)); err != nil {
+				if !gelesen {
+					gelesen = true
+					// Nach der Uhr des Servers, die Zeiten im Paket wählt der Absender.
+					if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE schluessel NOT LIKE 'quelle:root:%'),
+						count(*) FILTER (WHERE schluessel LIKE 'quelle:root:%')
+						FROM alarme WHERE host=$1 AND regel='quelle' AND zeit > now() - interval '1 hour'`, host).Scan(&andere, &root); err != nil {
+						return err
+					}
+				}
+				zuViele := false
+				if e.Benutzer == "root" {
+					root++
+					zuViele = root > quellenRootMax
+				} else if quellen[e.Benutzer]++; quellen[e.Benutzer] > quellenMax {
+					zuViele = true
+				} else {
+					andere++
+					zuViele = andere > quellenHostMax
+				}
+				if zuViele {
+					if !gemeldetesKonto[e.Benutzer] {
+						gemeldetesKonto[e.Benutzer] = true
+						if err := quellenFlut(ctx, tx, host, e.Benutzer); err != nil {
 							return err
 						}
 					}
@@ -215,6 +238,28 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 		}
 	}
 	return nil
+}
+
+// quellenFlut: auch eine zweite Flut fällt auf, aber den Schlüssel zählt der
+// Server, und nach flutMax steht nur noch ein Sammelalarm für die Stunde.
+func quellenFlut(ctx context.Context, tx pgx.Tx, host, konto string) error {
+	var n int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM alarme
+		WHERE host=$1 AND schluessel LIKE 'quellen:%' AND zeit > now() - interval '1 hour'`, host).Scan(&n); err != nil {
+		return err
+	}
+	stunde := strconv.FormatInt(time.Now().Unix()/3600, 10)
+	if n >= flutMax {
+		return alarmAnlegen(ctx, tx, host, "flut", "quellen:"+stunde+":weitere",
+			"Weitere Fluten von Anmeldungen aus neuen Quellen in dieser Stunde, bitte die Ereignisse ansehen")
+	}
+	// Die laufende Nummer aus der Folge, nicht aus dem Paket.
+	var folge int64
+	if err := tx.QueryRow(ctx, `SELECT nextval(pg_get_serial_sequence('alarme', 'id'))`).Scan(&folge); err != nil {
+		return err
+	}
+	return alarmAnlegen(ctx, tx, host, "flut", "quellen:"+stunde+":"+strconv.FormatInt(folge, 10),
+		fmt.Sprintf("Anmeldungen von %s aus zu vielen neuen Quellen, nicht mehr einzeln gemeldet", konto))
 }
 
 func (a *App) alarmLauf(ctx context.Context) {
@@ -268,8 +313,8 @@ func (a *App) alarmeSenden(ctx context.Context) {
 	}
 }
 
-// alarmeUeber schickt einen Schub. Wichtiges (Kette, Stille, Flut) und übriges
-// wechseln sich ab, Wichtiges zuerst: so hat beides immer Plätze. Darin geht es
+// alarmeUeber schickt einen Schub. Drei Klassen wechseln sich ab, in dieser
+// Folge: Kette und Stille, Flut, übriges. Jede hat so immer Plätze. Darin geht es
 // reihum je Host, für Neues und für Gescheitertes getrennt: eine Flut nimmt
 // einem Nachzügler so weder bei anderen Hosts noch beim eigenen den Platz.
 func (a *App) alarmeUeber(ctx context.Context, m melder) error {
@@ -278,20 +323,20 @@ func (a *App) alarmeUeber(ctx context.Context, m melder) error {
 		return nil
 	}
 	rows, err := a.db.Query(ctx, `WITH offen AS (
-			SELECT id, host, text, regel IN ('kette', 'still', 'flut') AS wichtig,
+			SELECT id, host, text, CASE WHEN regel IN ('kette', 'still') THEN 0 WHEN regel = 'flut' THEN 1 ELSE 2 END AS rang,
 			       (versucht_je ->> $2)::float8 AS versucht
 			FROM alarme WHERE zeit > $1 AND NOT ($2 = ANY(gesendet_an))
 		), zuletzt AS (
 			SELECT host, max(gesendet) AS wann FROM alarme WHERE zeit > $1 GROUP BY host
 		), gereiht AS (
 			SELECT o.*, z.wann,
-			       row_number() OVER (PARTITION BY o.wichtig, o.host, o.versucht IS NULL ORDER BY o.versucht, o.id) AS reihum
+			       row_number() OVER (PARTITION BY o.rang, o.host, o.versucht IS NULL ORDER BY o.versucht, o.id) AS reihum
 			FROM offen o JOIN zuletzt z USING (host)
 		)
 		SELECT id, host, text FROM (
-			SELECT *, row_number() OVER (PARTITION BY wichtig ORDER BY reihum, versucht NULLS FIRST, wann NULLS FIRST, id) AS platz
+			SELECT *, row_number() OVER (PARTITION BY rang ORDER BY reihum, versucht NULLS FIRST, wann NULLS FIRST, id) AS platz
 			FROM gereiht
-		) x ORDER BY platz, wichtig DESC LIMIT 20`, a.alarme.seit, m.name)
+		) x ORDER BY platz, rang LIMIT 20`, a.alarme.seit, m.name)
 	if err != nil {
 		return err
 	}
@@ -408,7 +453,9 @@ func (x Alarm) Klasse() string {
 }
 
 func (a *App) alarmeSeite(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.Query(r.Context(), `SELECT host, regel, text, zeit, gesendet FROM alarme ORDER BY id DESC LIMIT 300`)
+	rows, err := a.db.Query(r.Context(), `SELECT host, regel, text, zeit, gesendet FROM (
+			SELECT *, row_number() OVER (PARTITION BY host, regel ORDER BY id DESC) AS n FROM alarme
+		) x WHERE n <= 50 ORDER BY id DESC LIMIT 5000`)
 	if err != nil {
 		http.Error(w, "Datenbank", http.StatusInternalServerError)
 		return
