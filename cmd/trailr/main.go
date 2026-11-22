@@ -4,17 +4,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -23,7 +24,7 @@ import (
 
 type App struct {
 	// verwaltung: Änderungen an Konten, Rollen und Anmeldung laufen nacheinander.
-	verwaltung sync.Mutex
+	verwaltung Sperre
 	admins     []string // Vorgabe des Betreibers
 	db         *pgxpool.Pool
 	sso        *SSO
@@ -88,31 +89,56 @@ func (a *App) wege() http.Handler {
 }
 
 func (a *App) angemeldet(h http.HandlerFunc) http.HandlerFunc {
+	// Anmeldung und Konten verwalten nur Admins; vor der Einrichtung, wer den
+	// Code aus dem Log hat.
+	darf := func(w http.ResponseWriter, r *http.Request) bool {
+		if !a.sso.Geschuetzt() && a.sso.EinrichtungErlaubt(w, r) {
+			return true
+		}
+		if _, ok := a.sso.Wer(r); !ok {
+			http.Error(w, "Bitte anmelden", http.StatusUnauthorized)
+			return false
+		}
+		if !a.istAdmin(r) {
+			http.Error(w, "Nur für Admins", http.StatusForbidden)
+			return false
+		}
+		return true
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !inhaltZuerst(w, r) {
 			return
 		}
+		// Lesen und Testen ändern nichts und brauchen keine Sperre.
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.URL.Path == "/api/sso/testen" {
+			if darf(w, r) {
+				h(w, r)
+			}
+			return
+		}
+		// Der Anbieter wird vor der Sperre gefragt, und nur von Admins.
+		if r.URL.Path == "/api/sso/einstellungen" {
+			if !darf(w, r) {
+				return
+			}
+			roh, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Die Anfrage ist unvollständig", http.StatusBadRequest)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(roh))
+			var ok bool
+			if r, ok = a.sso.ausstellerVorab(w, r, roh); !ok {
+				return
+			}
+		}
 		// Erst sperren, dann prüfen: bis zum Speichern kann niemand die Rechte
 		// entziehen, auf die sich die Prüfung stützt.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			a.verwaltung.Lock()
-			defer a.verwaltung.Unlock()
-		}
-		// Anmeldung und Konten verwalten nur Admins; vor der Einrichtung, wer
-		// den Code aus dem Log hat.
-		if !a.sso.Geschuetzt() && a.sso.EinrichtungErlaubt(w, r) {
-			h(w, r)
-			return
-		}
-		if _, ok := a.sso.Wer(r); !ok {
-			http.Error(w, "Bitte anmelden", http.StatusUnauthorized)
-			return
-		}
-		if !a.istAdmin(r) {
-			http.Error(w, "Nur für Admins", http.StatusForbidden)
-			return
-		}
-		h(w, r)
+		a.verwaltung.fuehreAus(w, r, func(w http.ResponseWriter, r *http.Request) {
+			if darf(w, r) {
+				h(w, r)
+			}
+		})
 	}
 }
 

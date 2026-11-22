@@ -706,9 +706,12 @@ func (s *SSO) einstellungenSchreiben(w http.ResponseWriter, r *http.Request) {
 			ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": "Ohne Client-ID lässt sich SSO nicht einschalten."})
 			return
 		}
-		if _, err := s.anbieter(r.Context(), neu.Aussteller); err != nil {
-			ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": err.Error()})
-			return
+		// In dieser App ist der Anbieter schon vor der Sperre gefragt.
+		if r.Context().Value(ausstellerGeprueft{}) != neu.Aussteller {
+			if _, err := s.anbieter(r.Context(), neu.Aussteller); err != nil {
+				ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": err.Error()})
+				return
+			}
 		}
 	}
 	s.mu.Lock()
