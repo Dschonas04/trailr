@@ -158,6 +158,7 @@ type Daten struct {
 	Titel   string
 	Nav     string
 	Nutzer  SSONutzer
+	Admin   bool
 	Token   string
 	Hinweis string
 	Fehler  string

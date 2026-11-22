@@ -10,7 +10,7 @@
   </a>
   {{end}}
 </div>
-{{else}}<div class="leer">Noch kein Host liefert. <a href="/einrichten">Agent einrichten</a></div>{{end}}
+{{else}}<div class="leer">Noch kein Host liefert. {{if $.Admin}}<a href="/einrichten">Agent einrichten</a>{{end}}</div>{{end}}
 {{if .D.Fehl}}<h2>Letzte Fehlschläge</h2>{{template "tabelle" .D.Fehl}}{{end}}
 <h2>Letzte Ereignisse</h2>
 {{if .D.Letzte}}{{template "tabelle" .D.Letzte}}{{else}}<div class="muted">Noch nichts.</div>{{end}}

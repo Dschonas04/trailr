@@ -76,17 +76,27 @@ func (a *App) wege() http.Handler {
 	m.HandleFunc("GET /{$}", a.start)
 	m.HandleFunc("GET /ereignisse", a.ereignisse)
 	m.HandleFunc("GET /pruefen", a.pruefenSeite)
-	m.HandleFunc("GET /einrichten", a.einrichten)
+	m.HandleFunc("GET /einrichten", a.nurAdmin(a.einrichten))
 	return sicherheitskopf(nurAngemeldet(a.sso, m))
 }
 
 func (a *App) angemeldet(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := a.sso.Wer(r); ok || (!a.sso.Geschuetzt() && a.sso.EinrichtungErlaubt(w, r)) {
+		// Anmeldung und Konten verwalten nur Admins; vor der Einrichtung, wer
+		// den Code aus dem Log hat.
+		if !a.sso.Geschuetzt() && a.sso.EinrichtungErlaubt(w, r) {
 			h(w, r)
 			return
 		}
-		http.Error(w, "Bitte anmelden", http.StatusUnauthorized)
+		if _, ok := a.sso.Wer(r); !ok {
+			http.Error(w, "Bitte anmelden", http.StatusUnauthorized)
+			return
+		}
+		if !a.istAdmin(r) {
+			http.Error(w, "Nur für Admins", http.StatusForbidden)
+			return
+		}
+		h(w, r)
 	}
 }
 
@@ -112,7 +122,7 @@ func (a *App) agentPruefen(h func(http.ResponseWriter, *http.Request, string)) h
 
 func (a *App) daten(r *http.Request, titel, nav string, d any) Daten {
 	n, _ := a.sso.Wer(r)
-	return Daten{App: "Trailr", Titel: titel, Nav: nav, Nutzer: n, D: d}
+	return Daten{App: "Trailr", Titel: titel, Nav: nav, Nutzer: n, Admin: a.istAdmin(r), D: d}
 }
 
 func zahl(s string) int {
