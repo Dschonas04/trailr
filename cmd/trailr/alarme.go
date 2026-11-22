@@ -24,6 +24,8 @@ import (
 
 const (
 	vieleFehlschlaege = 5
+	fehlMuster        = 100  // so viele Muster von Fehlschlägen je Lieferung werden gezählt
+	meldungMax        = 3500 // Telegram nimmt 4096 Zeichen
 	stilleNach        = 30 * time.Minute
 )
 
@@ -112,8 +114,9 @@ func eineZeile(s string, n int) string {
 // übergangen, auch wenn der Server gleich danach stehen bleibt.
 func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, l []ereignis.Ereignis) error {
 	erledigt := map[string]bool{}
+	gezaehlt, geflutet := 0, false
 	for _, e := range l {
-		if time.Since(e.Zeit) > 24*time.Hour || len(erledigt) >= 200 {
+		if time.Since(e.Zeit) > 24*time.Hour {
 			continue // Nachlieferungen von gestern alarmieren nicht mehr
 		}
 		anmelden := e.Art == "anmeldung" || e.Art == "sudo" || e.Art == "su"
@@ -128,6 +131,18 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 				continue
 			}
 			erledigt[k] = true
+			// Nur das Zählen ist begrenzt. Die anderen Regeln sehen jedes Ereignis,
+			// und dass gekürzt wurde, ist selbst ein Alarm.
+			if gezaehlt++; gezaehlt > fehlMuster {
+				if !geflutet {
+					geflutet = true
+					if err := alarmAnlegen(ctx, tx, host, "flut", "flut:"+strconv.FormatInt(time.Now().Unix()/3600, 10),
+						fmt.Sprintf("Mehr als %d verschiedene Quellen oder Konten mit Fehlschlägen auf einmal", fehlMuster)); err != nil {
+						return err
+					}
+				}
+				continue
+			}
 			// Das engste Fenster von fünf Fehlschlägen in der Stunde um das Ereignis.
 			var viele bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM (
@@ -217,47 +232,77 @@ func (a *App) ketteWache(ctx context.Context) {
 }
 
 func (a *App) alarmeSenden(ctx context.Context) {
-	if a.alarme == nil || len(a.alarme.melder) == 0 {
+	if a.alarme == nil {
 		return
 	}
-	rows, err := a.db.Query(ctx, `SELECT id, host, text FROM alarme WHERE gesendet IS NULL AND zeit > $1 ORDER BY id LIMIT 20`, a.alarme.seit)
+	// Jeder Weg für sich: fällt einer aus, hält er die anderen nicht auf und
+	// bekommt nach, was ihm fehlt.
+	for _, m := range a.alarme.melder {
+		if err := a.alarmeUeber(ctx, m); err != nil {
+			log.Printf("Alarme per %s: %v", m.name, err)
+		}
+	}
+}
+
+// alarmeUeber schickt einen Schub: Kette und Stille zuerst, dann reihum je
+// Host, damit ein lauter Host die anderen nicht verdrängt.
+func (a *App) alarmeUeber(ctx context.Context, m melder) error {
+	rows, err := a.db.Query(ctx, `SELECT id, host, text FROM (
+			SELECT id, host, text, versucht, regel IN ('kette', 'still', 'flut') AS wichtig,
+			       row_number() OVER (PARTITION BY host ORDER BY versucht NULLS FIRST, id) AS reihum
+			FROM alarme WHERE zeit > $1 AND NOT ($2 = ANY(gesendet_an))
+		) x ORDER BY versucht NULLS FIRST, wichtig DESC, reihum, id LIMIT 20`, a.alarme.seit, m.name)
 	if err != nil {
-		log.Printf("Alarme: %v", err)
-		return
+		return err
 	}
 	defer rows.Close()
 	var ids []int64
 	var zeilen []string
+	laenge := 0
 	for rows.Next() {
 		var id int64
 		var host, text string
 		if err := rows.Scan(&id, &host, &text); err != nil {
-			log.Printf("Alarme: %v", err)
-			return
+			return err
+		}
+		z := eineZeile(host+": "+text, 400)
+		// In Byte gemessen, das ist nie weniger als Telegrams Zeichen.
+		if laenge += len(z) + 1; laenge > meldungMax && len(ids) > 0 {
+			break
 		}
 		ids = append(ids, id)
-		zeilen = append(zeilen, host+": "+text)
+		zeilen = append(zeilen, z)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil || len(ids) == 0 {
-		return
+		return err
 	}
-	einmal, ende := context.WithTimeout(ctx, 2*time.Minute)
-	defer ende()
-	raus := false
-	for _, m := range a.alarme.melder {
-		if err := m.senden(einmal, "Trailr\n"+strings.Join(zeilen, "\n")); err != nil {
-			log.Printf("Alarme per %s: %v", m.name, err)
-		} else {
-			raus = true
+	senden := func(z []string) error {
+		einmal, ende := context.WithTimeout(ctx, time.Minute)
+		defer ende()
+		return m.senden(einmal, "Trailr\n"+strings.Join(z, "\n"))
+	}
+	fehler := senden(zeilen)
+	if fehler != nil && len(ids) > 1 {
+		// Liegt es an einer Meldung, kommen die anderen einzeln durch.
+		ids, zeilen = ids[:1], zeilen[:1]
+		if e := senden(zeilen); e == nil {
+			fehler = nil
 		}
 	}
-	if !raus {
-		return
+	if fehler != nil {
+		// Beim zweiten Fehlschlag hinten anstellen. Verloren geht keine.
+		if _, err := a.db.Exec(ctx, `UPDATE alarme SET versucht = now() WHERE id = $1 AND $2 = ANY(versucht_an)`, ids[0], m.name); err != nil {
+			return err
+		}
+		if _, err := a.db.Exec(ctx, `UPDATE alarme SET versucht_an = array_append(versucht_an, $2) WHERE id = $1 AND NOT ($2 = ANY(versucht_an))`, ids[0], m.name); err != nil {
+			return err
+		}
+		return fehler
 	}
-	if _, err := a.db.Exec(ctx, `UPDATE alarme SET gesendet = now() WHERE id = ANY($1)`, ids); err != nil {
-		log.Printf("Alarme: %v", err)
-	}
+	_, err = a.db.Exec(ctx, `UPDATE alarme SET gesendet = COALESCE(gesendet, now()), gesendet_an = array_append(gesendet_an, $2)
+		WHERE id = ANY($1)`, ids, m.name)
+	return err
 }
 
 type Alarm struct {
@@ -270,6 +315,8 @@ func (x Alarm) RegelName() string {
 	switch x.Regel {
 	case "fehlschlaege":
 		return "Fehlschläge"
+	case "flut":
+		return "Flut"
 	case "quelle":
 		return "neue Quelle"
 	case "arbeitszeit":
@@ -283,7 +330,7 @@ func (x Alarm) RegelName() string {
 }
 
 func (x Alarm) Klasse() string {
-	if x.Regel == "kette" || x.Regel == "fehlschlaege" {
+	if x.Regel == "kette" || x.Regel == "fehlschlaege" || x.Regel == "flut" {
 		return "schlecht"
 	}
 	return "warn"

@@ -433,13 +433,16 @@ func exportAdresse(q url.Values, format string) string {
 	return "/ereignisse?" + n.Encode()
 }
 
-// csv entschärft ein Feld: kein Trenner, kein Zeilenumbruch, keine Formel.
+// formelAnfang: eine Formel am Anfang des Werts, auch hinter Leerraum und
+// Anführung, oder hinter einem Zeichen, an dem ein Programm trennen könnte.
+var formelAnfang = regexp.MustCompile(`(^|[,;\t\r\n])([\s\p{Z}"]*[=+\-@\x{ff1d}\x{ff0b}\x{ff0d}\x{ff20}])`)
+
+// csv macht aus einem Wert ein Feld: immer in Anführung und nie eine Formel.
+// Den unveränderten Wert gibt der Export als JSON.
 func csv(s string) string {
-	s = strings.NewReplacer(";", ",", "\n", " ", "\r", " ").Replace(s)
-	if s != "" && strings.ContainsRune("=+-@\t", rune(s[0])) {
-		s = "'" + s
-	}
-	return s
+	s = formelAnfang.ReplaceAllString(s, "${1}'${2}")
+	s = strings.NewReplacer("\n", " ", "\r", " ", `"`, `""`).Replace(s)
+	return `"` + s + `"`
 }
 
 // Pruefung ist das Ergebnis der Kettenprüfung eines Hosts.

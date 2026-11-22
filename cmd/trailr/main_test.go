@@ -30,7 +30,7 @@ func TestSeitenRendern(t *testing.T) {
 }
 
 func TestCSV(t *testing.T) {
-	if csv("=HYPERLINK(1);x\ny") != "'=HYPERLINK(1),x y" {
+	if csv("=HYPERLINK(1);\"x\"\ny") != `"'=HYPERLINK(1);""x"" y"` {
 		t.Error(csv("=HYPERLINK(1);x\ny"))
 	}
 }

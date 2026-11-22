@@ -56,3 +56,6 @@ CREATE TABLE IF NOT EXISTS alarme (
 );
 CREATE INDEX IF NOT EXISTS alarme_zeit ON alarme(zeit DESC);
 CREATE INDEX IF NOT EXISTS ereignisse_sitzung ON ereignisse(host, sitzung, zeit) WHERE sitzung <> '';
+ALTER TABLE alarme ADD COLUMN IF NOT EXISTS gesendet_an text[] NOT NULL DEFAULT '{}';
+ALTER TABLE alarme ADD COLUMN IF NOT EXISTS versucht_an text[] NOT NULL DEFAULT '{}';
+ALTER TABLE alarme ADD COLUMN IF NOT EXISTS versucht timestamptz;
