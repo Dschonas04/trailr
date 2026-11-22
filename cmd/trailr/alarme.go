@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -27,8 +28,9 @@ const (
 	fehlMuster        = 100  // so viele Muster von Fehlschlägen je Lieferung werden gezählt
 	meldungMax        = 3500 // Telegram nimmt 4096 Zeichen
 	wegPause          = 5 * time.Minute
-	quellenMax        = 50  // so viele neue Quellen meldet eine Lieferung je Konto einzeln
-	quellenHostMax    = 200 // je Host und Stunde, alle Konten außer root
+	quellenKontoMax   = 30  // je Konto und Stunde
+	quellenHostMax    = 200 // je Host und Stunde, der erste Alarm eines Kontos geht darüber hinaus
+	quellenKontenMax  = 500 // so viele Konten je Host und Stunde bekommen ihren ersten Alarm sicher
 	quellenRootMax    = 100 // je Host und Stunde, nur root: den Anteil nimmt ihm keiner
 	flutMax           = 5   // je Host und Stunde, danach ein Sammelalarm
 	sammelFrist       = 15 * time.Second
@@ -129,9 +131,9 @@ func eineZeile(s string, n int) string {
 func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, l []ereignis.Ereignis) error {
 	erledigt := map[string]bool{}
 	gezaehlt, geflutet := 0, false
-	quellen := map[string]int{}
+	jeKonto := map[string]int{}
 	gemeldetesKonto := map[string]bool{}
-	var andere, root int
+	var andere, konten int
 	gelesen := false
 	for _, e := range l {
 		if time.Since(e.Zeit) > 24*time.Hour {
@@ -176,7 +178,8 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 				}
 			}
 		case e.Erfolg && e.Art == "anmeldung" && e.Quelle != "":
-			k := "quelle:" + e.Benutzer + ":" + e.Quelle
+			// Mit Länge: Namen und IPv6-Adressen enthalten Doppelpunkte.
+			k := fmt.Sprintf("quelle:%d:%s:%s", len(e.Benutzer), e.Benutzer, e.Quelle)
 			if erledigt[k] {
 				continue
 			}
@@ -191,25 +194,40 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 				return err
 			}
 			if frueher && !bekannt {
+				// Gezählt wird nach der Uhr des Servers und dem genauen Namen: Zeiten
+				// und Namen im Paket wählt der Absender.
 				if !gelesen {
 					gelesen = true
-					// Nach der Uhr des Servers, die Zeiten im Paket wählt der Absender.
-					if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE schluessel NOT LIKE 'quelle:root:%'),
-						count(*) FILTER (WHERE schluessel LIKE 'quelle:root:%')
-						FROM alarme WHERE host=$1 AND regel='quelle' AND zeit > now() - interval '1 hour'`, host).Scan(&andere, &root); err != nil {
+					if err := tx.QueryRow(ctx, `SELECT count(*), count(DISTINCT konto) FROM alarme
+						WHERE host=$1 AND regel='quelle' AND konto <> 'root' AND zeit > now() - interval '1 hour'`, host).Scan(&andere, &konten); err != nil {
 						return err
 					}
 				}
-				zuViele := false
-				if e.Benutzer == "root" {
-					root++
-					zuViele = root > quellenRootMax
-				} else if quellen[e.Benutzer]++; quellen[e.Benutzer] > quellenMax {
-					zuViele = true
-				} else {
-					andere++
-					zuViele = andere > quellenHostMax
+				bisher, da := jeKonto[e.Benutzer]
+				if !da {
+					if err := tx.QueryRow(ctx, `SELECT count(*) FROM alarme
+						WHERE host=$1 AND regel='quelle' AND konto=$2 AND zeit > now() - interval '1 hour'`, host, e.Benutzer).Scan(&bisher); err != nil {
+						return err
+					}
 				}
+				var zuViele bool
+				switch {
+				case e.Benutzer == "root":
+					zuViele = bisher >= quellenRootMax
+				case bisher == 0:
+					if zuViele = konten >= quellenKontenMax; !zuViele {
+						konten++
+						andere++
+					}
+				default:
+					if zuViele = bisher >= quellenKontoMax || andere >= quellenHostMax; !zuViele {
+						andere++
+					}
+				}
+				if !zuViele {
+					bisher++
+				}
+				jeKonto[e.Benutzer] = bisher
 				if zuViele {
 					if !gemeldetesKonto[e.Benutzer] {
 						gemeldetesKonto[e.Benutzer] = true
@@ -219,7 +237,9 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 					}
 					continue
 				}
-				if err := alarmAnlegen(ctx, tx, host, "quelle", k, "Anmeldung von "+e.Benutzer+" aus neuer Quelle "+e.Quelle); err != nil {
+				if _, err := tx.Exec(ctx, `INSERT INTO alarme (host, regel, schluessel, text, konto) VALUES ($1, 'quelle', $2, $3, $4)
+					ON CONFLICT (host, schluessel) DO NOTHING`,
+					host, kuerzen(k, 300), eineZeile("Anmeldung von "+e.Benutzer+" aus neuer Quelle "+e.Quelle, 300), e.Benutzer); err != nil {
 					return err
 				}
 			}
@@ -243,6 +263,11 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 // quellenFlut: auch eine zweite Flut fällt auf, aber den Schlüssel zählt der
 // Server, und nach flutMax steht nur noch ein Sammelalarm für die Stunde.
 func quellenFlut(ctx context.Context, tx pgx.Tx, host, konto string) error {
+	if konto == "root" {
+		// Eigener Schlüssel: den nimmt ihm kein anderes Konto.
+		return alarmAnlegen(ctx, tx, host, "flut", "root-quellen:"+strconv.FormatInt(time.Now().Unix()/3600, 10),
+			fmt.Sprintf("Anmeldungen von root aus mehr als %d neuen Quellen in einer Stunde", quellenRootMax))
+	}
 	var n int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM alarme
 		WHERE host=$1 AND schluessel LIKE 'quellen:%' AND zeit > now() - interval '1 hour'`, host).Scan(&n); err != nil {
@@ -452,23 +477,90 @@ func (x Alarm) Klasse() string {
 	return "warn"
 }
 
+type alarmGruppe struct {
+	Host, Regel, Adresse string
+	Weitere              int
+}
+
+func (g alarmGruppe) RegelName() string { return Alarm{Regel: g.Regel}.RegelName() }
+
+const alarmSeite = 100
+
 func (a *App) alarmeSeite(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.Query(r.Context(), `SELECT host, regel, text, zeit, gesendet FROM (
-			SELECT *, row_number() OVER (PARTITION BY host, regel ORDER BY id DESC) AS n FROM alarme
-		) x WHERE n <= 50 ORDER BY id DESC LIMIT 5000`)
+	q := r.URL.Query()
+	host, regel := q.Get("host"), q.Get("regel")
+	vor := int64(math.MaxInt64)
+	if v, err := strconv.ParseInt(q.Get("vor"), 10, 64); err == nil && v > 0 {
+		vor = v
+	}
+	// Übersicht: je Host und Regel die neuesten, root für sich, und was darüber
+	// hinaus da ist als Verweis. Gefiltert: alles, zum Blättern.
+	gefiltert := host != "" || regel != "" || q.Get("vor") != ""
+	frage := `SELECT id, host, regel, text, zeit, gesendet FROM (
+			SELECT * FROM (
+				SELECT *, row_number() OVER (PARTITION BY host, regel, konto = 'root' ORDER BY id DESC) AS n FROM alarme
+			) x WHERE n <= 50 ORDER BY n, id DESC LIMIT 5000
+		) y ORDER BY id DESC`
+	var args []any
+	if gefiltert {
+		frage = `SELECT id, host, regel, text, zeit, gesendet FROM alarme
+			WHERE ($1 = '' OR host = $1) AND ($2 = '' OR regel = $2) AND id < $3 ORDER BY id DESC LIMIT $4`
+		args = []any{host, regel, vor, alarmSeite + 1}
+	}
+	rows, err := a.db.Query(r.Context(), frage, args...)
 	if err != nil {
 		http.Error(w, "Datenbank", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 	var l []Alarm
+	var ids []int64
+	gezeigt := map[[2]string]int{}
 	for rows.Next() {
 		var x Alarm
-		if err := rows.Scan(&x.Host, &x.Regel, &x.Text, &x.Zeit, &x.Gesendet); err != nil {
+		var id int64
+		if err := rows.Scan(&id, &x.Host, &x.Regel, &x.Text, &x.Zeit, &x.Gesendet); err != nil {
 			http.Error(w, "Datenbank", http.StatusInternalServerError)
 			return
 		}
-		l = append(l, x)
+		l, ids = append(l, x), append(ids, id)
+		gezeigt[[2]string{x.Host, x.Regel}]++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Datenbank", http.StatusInternalServerError)
+		return
+	}
+	aeltere := ""
+	var mehr []alarmGruppe
+	if gefiltert {
+		if len(l) > alarmSeite {
+			l = l[:alarmSeite]
+			aeltere = "/alarme?" + url.Values{"host": {host}, "regel": {regel}, "vor": {strconv.FormatInt(ids[alarmSeite-1], 10)}}.Encode()
+		}
+	} else {
+		alle, err := a.db.Query(r.Context(), `SELECT host, regel, count(*) FROM alarme GROUP BY host, regel ORDER BY host, regel`)
+		if err != nil {
+			http.Error(w, "Datenbank", http.StatusInternalServerError)
+			return
+		}
+		defer alle.Close()
+		for alle.Next() {
+			var g alarmGruppe
+			var n int
+			if err := alle.Scan(&g.Host, &g.Regel, &n); err != nil {
+				http.Error(w, "Datenbank", http.StatusInternalServerError)
+				return
+			}
+			if g.Weitere = n - gezeigt[[2]string{g.Host, g.Regel}]; g.Weitere > 0 {
+				g.Adresse = "/alarme?" + url.Values{"host": {g.Host}, "regel": {g.Regel}}.Encode()
+				mehr = append(mehr, g)
+			}
+		}
+		if err := alle.Err(); err != nil {
+			http.Error(w, "Datenbank", http.StatusInternalServerError)
+			return
+		}
 	}
 	var wege []string
 	zeit := ""
@@ -480,5 +572,5 @@ func (a *App) alarmeSeite(w http.ResponseWriter, r *http.Request) {
 			zeit = fmt.Sprintf("%d bis %d Uhr", a.alarme.von, a.alarme.bis)
 		}
 	}
-	a.v.zeigen(w, r, "alarme", a.daten(r, "Alarme", "alarme", map[string]any{"Liste": l, "Wege": strings.Join(wege, " und "), "Arbeitszeit": zeit}))
+	a.v.zeigen(w, r, "alarme", a.daten(r, "Alarme", "alarme", map[string]any{"Liste": l, "Mehr": mehr, "Aeltere": aeltere, "Gefiltert": gefiltert, "Host": host, "Regel": Alarm{Regel: regel}.RegelName(), "Wege": strings.Join(wege, " und "), "Arbeitszeit": zeit}))
 }

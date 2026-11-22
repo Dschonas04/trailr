@@ -59,3 +59,5 @@ CREATE INDEX IF NOT EXISTS ereignisse_sitzung ON ereignisse(host, sitzung, zeit)
 ALTER TABLE alarme ADD COLUMN IF NOT EXISTS gesendet_an text[] NOT NULL DEFAULT '{}';
 ALTER TABLE alarme ADD COLUMN IF NOT EXISTS versucht_je jsonb NOT NULL DEFAULT '{}';  -- letzter Fehlversuch je Weg
 ALTER TABLE alarme DROP COLUMN IF EXISTS versucht_an, DROP COLUMN IF EXISTS versucht;
+ALTER TABLE alarme ADD COLUMN IF NOT EXISTS konto text NOT NULL DEFAULT '';  -- bei neuer Quelle: wer, für die Grenzen genau verglichen
+CREATE INDEX IF NOT EXISTS alarme_host_regel ON alarme(host, regel, id DESC);
