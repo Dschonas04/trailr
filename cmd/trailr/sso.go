@@ -674,11 +674,8 @@ func (s *SSO) einstellungenLesen(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *SSO) einstellungenSchreiben(w http.ResponseWriter, r *http.Request) {
-	var neu struct {
-		SSOKonfig
-		GeheimnisBehalten bool `json:"geheimnisBehalten"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&neu); err != nil {
+	neu, err := ssoEingabeLesen(r.Body)
+	if err != nil {
 		ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": "Ungültige Angaben"})
 		return
 	}
@@ -706,17 +703,20 @@ func (s *SSO) einstellungenSchreiben(w http.ResponseWriter, r *http.Request) {
 			ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": "Ohne Client-ID lässt sich SSO nicht einschalten."})
 			return
 		}
-		// In dieser App ist der Anbieter schon vor der Sperre gefragt.
-		if r.Context().Value(ausstellerGeprueft{}) != neu.Aussteller {
-			if _, err := s.anbieter(r.Context(), neu.Aussteller); err != nil {
-				ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": err.Error()})
+		if geprueft, vorab := r.Context().Value(ausstellerGeprueft{}).(string); vorab {
+			// Unter der Sperre: kein Netz, nur genau das Geprüfte.
+			if geprueft == "" || geprueft != neu.Aussteller {
+				ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": "Der Aussteller ist nicht vorab geprüft."})
 				return
 			}
+		} else if _, err := s.anbieter(r.Context(), neu.Aussteller); err != nil {
+			ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": err.Error()})
+			return
 		}
 	}
 	s.mu.Lock()
 	s.k = neu.SSOKonfig
-	err := s.sichern()
+	err = s.sichern()
 	s.mu.Unlock()
 	if err != nil {
 		ssoJSON(w, http.StatusInternalServerError, map[string]string{"fehler": "Nicht gespeichert: " + err.Error()})

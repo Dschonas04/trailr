@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"maps"
 	"net/http"
 	"strings"
@@ -93,17 +95,42 @@ func (s *Sperre) fuehreAus(w http.ResponseWriter, r *http.Request, h http.Handle
 
 type ausstellerGeprueft struct{}
 
-// ausstellerVorab fragt den Anbieter, bevor die Sperre gilt. Speichern darf
-// danach nur genau diesen Aussteller.
-func (s *SSO) ausstellerVorab(w http.ResponseWriter, r *http.Request, roh []byte) (*http.Request, bool) {
-	var k SSOKonfig
-	if json.Unmarshal(roh, &k) != nil || !k.Aktiv {
-		return r, true
+type ssoEingabe struct {
+	SSOKonfig
+	GeheimnisBehalten bool `json:"geheimnisBehalten"`
+}
+
+// ssoEingabeLesen ist der einzige Leser der SSO-Einstellung, vor der Sperre
+// wie beim Speichern: genau ein JSON-Wert, danach nichts.
+func ssoEingabeLesen(r io.Reader) (ssoEingabe, error) {
+	var e ssoEingabe
+	d := json.NewDecoder(io.LimitReader(r, 1<<16))
+	if err := d.Decode(&e); err != nil {
+		return e, err
 	}
-	iss := strings.TrimSuffix(strings.TrimSpace(k.Aussteller), "/")
-	if _, err := s.anbieter(r.Context(), iss); err != nil {
-		ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": err.Error()})
+	var rest json.RawMessage
+	if err := d.Decode(&rest); !errors.Is(err, io.EOF) {
+		return e, errors.New("hinter dem JSON steht noch etwas")
+	}
+	e.Aussteller = strings.TrimSuffix(strings.TrimSpace(e.Aussteller), "/")
+	return e, nil
+}
+
+// ausstellerVorab fragt den Anbieter, bevor die Sperre gilt. Ab hier steht im
+// Kontext, was geprüft ist (leer: SSO aus), und nur das darf gespeichert werden.
+func (s *SSO) ausstellerVorab(w http.ResponseWriter, r *http.Request, roh []byte) (*http.Request, bool) {
+	e, err := ssoEingabeLesen(bytes.NewReader(roh))
+	if err != nil {
+		ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": "Ungültige Angaben"})
 		return r, false
 	}
-	return r.WithContext(context.WithValue(r.Context(), ausstellerGeprueft{}, iss)), true
+	geprueft := ""
+	if e.Aktiv {
+		if _, err := s.anbieter(r.Context(), e.Aussteller); err != nil {
+			ssoJSON(w, http.StatusBadRequest, map[string]string{"fehler": err.Error()})
+			return r, false
+		}
+		geprueft = e.Aussteller
+	}
+	return r.WithContext(context.WithValue(r.Context(), ausstellerGeprueft{}, geprueft)), true
 }
