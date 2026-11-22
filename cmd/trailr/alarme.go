@@ -27,7 +27,7 @@ const (
 	fehlMuster        = 100  // so viele Muster von Fehlschlägen je Lieferung werden gezählt
 	meldungMax        = 3500 // Telegram nimmt 4096 Zeichen
 	wegPause          = 5 * time.Minute
-	quellenMax        = 50 // so viele neue Quellen meldet eine Lieferung einzeln
+	quellenMax        = 50 // so viele neue Quellen meldet eine Lieferung je Konto einzeln, root immer
 	sammelFrist       = 15 * time.Second
 	einzelFrist       = 10 * time.Second
 	schubFrist        = 2 * time.Minute
@@ -126,7 +126,7 @@ func eineZeile(s string, n int) string {
 func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, l []ereignis.Ereignis) error {
 	erledigt := map[string]bool{}
 	gezaehlt, geflutet := 0, false
-	quellen := 0
+	quellen := map[string]int{}
 	for _, e := range l {
 		if time.Since(e.Zeit) > 24*time.Hour {
 			continue // Nachlieferungen von gestern alarmieren nicht mehr
@@ -170,24 +170,27 @@ func (al *Alarme) bewerten(ctx context.Context, tx pgx.Tx, hostID, host string, 
 				}
 			}
 		case e.Erfolg && e.Art == "anmeldung" && e.Quelle != "":
-			k := "quelle:" + e.Quelle
+			k := "quelle:" + e.Benutzer + ":" + e.Quelle
 			if erledigt[k] {
 				continue
 			}
 			erledigt[k] = true
-			// Neu heißt: es gab früher Anmeldungen, aber keine von dort.
+			// Neu heißt: es gab früher Anmeldungen, aber keine dieses Kontos von dort.
+			// Was bei einem Konto unterging, macht die Quelle für andere nicht bekannt.
 			var frueher, bekannt bool
 			if err := tx.QueryRow(ctx, `SELECT
 				EXISTS (SELECT 1 FROM ereignisse WHERE host=$1::uuid AND art='anmeldung' AND erfolg AND zeit < $3),
-				EXISTS (SELECT 1 FROM ereignisse WHERE host=$1::uuid AND art='anmeldung' AND erfolg AND zeit < $3 AND quelle=$2)`,
-				hostID, e.Quelle, e.Zeit).Scan(&frueher, &bekannt); err != nil {
+				EXISTS (SELECT 1 FROM ereignisse WHERE host=$1::uuid AND art='anmeldung' AND erfolg AND zeit < $3 AND quelle=$2 AND benutzer=$4)`,
+				hostID, e.Quelle, e.Zeit, e.Benutzer).Scan(&frueher, &bekannt); err != nil {
 				return err
 			}
 			if frueher && !bekannt {
-				if quellen++; quellen > quellenMax {
-					if quellen == quellenMax+1 {
-						if err := alarmAnlegen(ctx, tx, host, "flut", "quellen:"+strconv.FormatInt(time.Now().Unix()/3600, 10),
-							fmt.Sprintf("Anmeldungen aus mehr als %d neuen Quellen auf einmal", quellenMax)); err != nil {
+				quellen[e.Benutzer]++
+				if n := quellen[e.Benutzer]; n > quellenMax && e.Benutzer != "root" {
+					if n == quellenMax+1 {
+						// Je Konto und Lieferung: auch die zweite Flut einer Stunde fällt auf.
+						if err := alarmAnlegen(ctx, tx, host, "flut", "quellen:"+e.Kennung,
+							fmt.Sprintf("Anmeldungen von %s aus mehr als %d neuen Quellen auf einmal", e.Benutzer, quellenMax)); err != nil {
 							return err
 						}
 					}
