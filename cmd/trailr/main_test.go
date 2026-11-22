@@ -14,8 +14,10 @@ func TestSeitenRendern(t *testing.T) {
 	h := []Host{{ID: "h1", Name: "vm-debian-docker", Zuletzt: &jetzt, Heute: 3, Fehl: 1, Benutzer: 1, Agent: "v0.1"}}
 	faelle := map[string]map[string]any{
 		"start":      {"Hosts": h, "Letzte": z, "Fehl": z},
-		"ereignisse": {"Liste": z, "F": Filter{Sitzung: "3"}, "Hosts": h, "Arten": []string{"sudo"}, "Benutzer": []string{"jonas"}, "Voll": true, "Abfrage": "host=x"},
+		"ereignisse": {"Liste": z, "F": Filter{Sitzung: "3"}, "Hosts": h, "Arten": []string{"sudo"}, "Benutzer": []string{"jonas"}, "Voll": true, "CSV": "/ereignisse?format=csv", "JSON": "/ereignisse?format=json"},
 		"pruefen":    {"Ergebnis": []Pruefung{{Host: "a", Anzahl: 3, OK: true}, {Host: "b", Anzahl: 2, Grund: "geändert", Bruch: &z[0]}}, "Gelaufen": true},
+		"alarme":     {"Liste": []Alarm{{Host: "a", Regel: "kette", Text: "gebrochen", Zeit: jetzt}}},
+		"sitzung":    {"Host": "a", "Nummer": "3", "Liste": z, "Von": jetzt, "Bis": jetzt, "Dauer": "5s"},
 		"einrichten": {"Server": "https://10.0.2.7:8400", "Tage": 365},
 	}
 	for name, d := range faelle {

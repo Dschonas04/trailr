@@ -32,6 +32,13 @@
       TRAILR_SERVER={{ trailr_server }}
       TRAILR_SCHLUESSEL={{ (trailr_schluessel ~ ':' ~ inventory_hostname) | hash('sha256') }}
       {% endif %}
+      {% if trailr_zertifikat %}
+      TRAILR_ZERTIFIKAT={{ trailr_zertifikat }}
+      TRAILR_ZERTIFIKAT_SCHLUESSEL={{ trailr_zertifikat_schluessel }}
+      {% endif %}
+      {% if trailr_ca %}
+      TRAILR_CA={{ trailr_ca }}
+      {% endif %}
       {% if trailr_ordner %}
       TRAILR_ORDNER={{ trailr_ordner }}
       TRAILR_ORDNER_TAGE={{ trailr_ordner_tage }}

@@ -2,6 +2,9 @@
 
 ## Unveröffentlicht
 
+- Sicherheit: Die Prüfung erkennt gelöschte älteste und vollständig gelöschte Einträge, Feldgrenzen im Hash lassen sich nicht schieben, ein Nullbyte hält die Lieferung nicht mehr auf.
+- Alarme (Oberfläche, auf Wunsch Telegram und Mail), Zeitleiste je Sitzung, Export als JSON und vollständiger als CSV.
+- mTLS für Lieferungen, aus bis es eingerichtet ist.
 - Sicherheit: Die SSO-Einstellung hat einen Leser für Prüfung und Speichern und lehnt Unlesbares ab.
 - Doppelte id im Seitengerüst behoben.
 - Sicherheit: Die Sperre der Verwaltung wartet weder auf den Browser noch auf den Anbieter und hat eine Zeitgrenze.

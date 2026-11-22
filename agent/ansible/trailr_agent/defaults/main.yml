@@ -8,12 +8,17 @@ trailr_schluessel: "{{ vault_trailr_agent_schluessel }}"
 trailr_ordner: ""
 # Tagesdateien so viele Tage behalten (0: alle).
 trailr_ordner_tage: 0
+# mTLS, nur wenn der Server TRAILR_MTLS_PORT hat: Dateien, die der Benutzer
+# trailr lesen darf. Im Zertifikat steht der inventory_hostname.
+trailr_zertifikat: ""
+trailr_zertifikat_schluessel: ""
+trailr_ca: ""
 # auditd mit den Regeln für Befehle und Dateien einrichten.
 trailr_auditd: true
 # Prüfsumme des Agenten, hier im Repository festgehalten und nicht vom Server
 # geholt: sonst prüft der Server sich selbst. Nach jeder Änderung am Agenten
 # neu setzen (reproduzierbar: make agent-pruefsumme).
-trailr_agent_sha256: "62db9b6bf2acfd15bc0e0528c9b619858b1dca5abbb4d0d837e5fdaffaf5b4d2"
+trailr_agent_sha256: "6970c60eb496e890ab337a664d4f7a59424768a3c210831f4984edb2c60c74bf"
 # Woher der Agent kommt: vom Server, oder ohne Server von einer anderen
 # Adresse (etwa einem Release). Geprüft wird immer gegen trailr_agent_sha256.
 trailr_agent_quelle: "{{ trailr_server | default('https://10.0.2.7:8400', true) }}/agent/trailr-agent"

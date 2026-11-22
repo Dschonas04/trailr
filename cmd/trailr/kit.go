@@ -92,6 +92,7 @@ var vorlagenFunktionen = template.FuncMap{
 		}
 		return t.Local().Format("2006-01-02T15:04")
 	},
+	"uhr": func(t time.Time) string { return t.Local().Format("02.01. 15:04:05") },
 	"seit": func(t time.Time) string {
 		d := time.Since(t)
 		switch {

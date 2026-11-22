@@ -36,3 +36,23 @@ CREATE TABLE IF NOT EXISTS admins (
 	kennung text PRIMARY KEY,
 	seit    timestamptz NOT NULL DEFAULT now()
 );
+
+-- Wo die Kette beginnt. Nach dem Aufräumen rückt er vor, sonst nie: fehlt der
+-- älteste Eintrag, fällt es auf.
+ALTER TABLE hosts ADD COLUMN IF NOT EXISTS kette_anfang text;
+UPDATE hosts h SET kette_anfang = COALESCE(
+	(SELECT e.vorher FROM ereignisse e WHERE e.host = h.id ORDER BY e.id LIMIT 1), h.letzter_hash)
+	WHERE h.kette_anfang IS NULL;
+
+CREATE TABLE IF NOT EXISTS alarme (
+	id         bigserial PRIMARY KEY,
+	zeit       timestamptz NOT NULL DEFAULT now(),
+	host       text NOT NULL,
+	regel      text NOT NULL,     -- fehlschlaege | quelle | arbeitszeit | still | kette
+	schluessel text NOT NULL,     -- gegen Wiederholung
+	text       text NOT NULL,
+	gesendet   timestamptz,
+	UNIQUE (host, schluessel)
+);
+CREATE INDEX IF NOT EXISTS alarme_zeit ON alarme(zeit DESC);
+CREATE INDEX IF NOT EXISTS ereignisse_sitzung ON ereignisse(host, sitzung, zeit) WHERE sitzung <> '';

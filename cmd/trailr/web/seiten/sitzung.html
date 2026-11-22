@@ -1,0 +1,23 @@
+{{define "inhalt"}}
+<div class="leiste"><h1>Sitzung {{.D.Nummer}}</h1><a class="knopf" href="/ereignisse?host={{.D.Host}}&amp;sitzung={{.D.Nummer}}">Als Tabelle</a></div>
+<div class="zahlen">
+  <div class="zahl"><strong class="zahl-klein">{{.D.Host}}</strong><span>Host</span></div>
+  <div class="zahl"><strong class="zahl-klein">{{len .D.Liste}}</strong><span>Ereignisse</span></div>
+  {{if .D.Dauer}}<div class="zahl"><strong class="zahl-klein">{{.D.Dauer}}</strong><span>{{datum .D.Von}} bis {{datum .D.Bis}}</span></div>{{end}}
+</div>
+<ol class="zeitleiste">
+{{range .D.Liste}}
+  <li class="{{.Klasse}}">
+    <time class="muted klein">{{uhr .Zeit}}</time>
+    <div class="zl-inhalt">
+      <span class="pille {{.Klasse}}">{{.ArtName}}{{if not .Erfolg}} fehlgeschlagen{{end}}</span>
+      <strong>{{.Benutzer}}</strong>{{if and .Als (ne .Als .Benutzer)}} <span class="muted">als {{.Als}}</span>{{end}}
+      {{if .Quelle}}<span class="muted klein">{{.Quelle}}</span>{{end}}
+      <div class="code umbruch">{{.Text}}</div>
+    </div>
+  </li>
+{{end}}
+</ol>
+{{if .D.Voll}}<p class="muted klein">Die ersten 5000 Ereignisse.</p>{{end}}
+<p class="muted klein">Gezeigt sind drei Tage vor und nach dem gewählten Ereignis: Sitzungsnummern beginnen nach einem Neustart von vorn.</p>
+{{end}}

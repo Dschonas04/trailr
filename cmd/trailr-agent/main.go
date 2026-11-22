@@ -83,8 +83,12 @@ func main() {
 	if err := os.MkdirAll(*dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
+	client, err := neuerClient(os.Getenv("TRAILR_ZERTIFIKAT"), os.Getenv("TRAILR_ZERTIFIKAT_SCHLUESSEL"), os.Getenv("TRAILR_CA"))
+	if err != nil {
+		log.Fatalf("TLS: %v", err)
+	}
 	a := &agent{server: strings.TrimRight(*server, "/"), schluessel: schluessel, host: host, dir: *dir,
-		client: &http.Client{Timeout: 30 * time.Second}}
+		client: client}
 	if *ordner != "" {
 		o, err := neueAblage(*ordner, host, *tage)
 		if err != nil {

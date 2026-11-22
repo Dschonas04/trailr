@@ -1,1 +1,16 @@
-{{define "nav"}}<a href="/"{{if gleich .Nav "start"}} class="aktiv"{{end}}>Übersicht</a><a href="/ereignisse"{{if gleich .Nav "ereignisse"}} class="aktiv"{{end}}>Ereignisse</a><a href="/pruefen"{{if gleich .Nav "pruefen"}} class="aktiv"{{end}}>Kette prüfen</a>{{if .Admin}}<a href="/einrichten"{{if gleich .Nav "einrichten"}} class="aktiv"{{end}}>Agent einrichten</a>{{end}}{{end}}
+{{define "nav"}}<a href="/"{{if gleich .Nav "start"}} class="aktiv"{{end}}>Übersicht</a><a href="/ereignisse"{{if gleich .Nav "ereignisse"}} class="aktiv"{{end}}>Ereignisse</a><a href="/alarme"{{if gleich .Nav "alarme"}} class="aktiv"{{end}}>Alarme</a><a href="/pruefen"{{if gleich .Nav "pruefen"}} class="aktiv"{{end}}>Kette prüfen</a>{{if .Admin}}<a href="/einrichten"{{if gleich .Nav "einrichten"}} class="aktiv"{{end}}>Agent einrichten</a>{{end}}{{end}}
+{{define "tabelle"}}
+<table>
+  <tr><th>Zeit</th><th>Host</th><th>Art</th><th>Benutzer</th><th>Was</th><th class="weg">Quelle</th></tr>
+  {{range .}}
+  <tr class="zeile">
+    <td class="muted klein nowrap">{{datum .Zeit}}</td>
+    <td><a href="/ereignisse?host={{.Host}}">{{.Host}}</a></td>
+    <td><span class="pille {{.Klasse}}">{{.ArtName}}{{if not .Erfolg}} fehlgeschlagen{{end}}</span></td>
+    <td><a href="/ereignisse?benutzer={{.Benutzer}}">{{.Benutzer}}</a>{{if and .Als (ne .Als .Benutzer)}} <span class="muted">als {{.Als}}</span>{{end}}</td>
+    <td class="code umbruch">{{.Text}}{{if .Sitzung}} <a class="muted klein" href="/sitzung/{{.ID}}">Sitzung {{.Sitzung}}</a>{{end}}</td>
+    <td class="weg muted klein">{{.Quelle}}</td>
+  </tr>
+  {{end}}
+</table>
+{{end}}

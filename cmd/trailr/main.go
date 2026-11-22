@@ -32,6 +32,8 @@ type App struct {
 	schluessel string // Agent-Schlüssel
 	tage       int    // Aufbewahrung
 	agentDatei string
+	alarme     *Alarme
+	nurMTLS    bool // Lieferungen nur am mTLS-Port
 }
 
 func main() {
@@ -55,7 +57,15 @@ func main() {
 	a.sso.ErstesKonto = a.ersterAdmin
 	a.sso.KontoWeg = a.adminEntziehen
 	a.sso.Frei = []string{"/statisch/", "/healthz", "/api/lieferung", "/agent/"}
+	a.alarme = neueAlarme()
+	if port := umgebung("TRAILR_MTLS_PORT", ""); port != "" {
+		if err := a.mtlsStarten(ctx, port); err != nil {
+			log.Fatalf("mTLS: %v", err)
+		}
+		a.nurMTLS = true
+	}
 	go a.aufraeumen(ctx)
+	go a.alarmLauf(ctx)
 
 	adresse := ":" + umgebung("TRAILR_PORT", "8400")
 	srv := &http.Server{Addr: adresse, Handler: a.wege(), ReadHeaderTimeout: 10 * time.Second}
@@ -78,7 +88,15 @@ func (a *App) wege() http.Handler {
 	m.HandleFunc("GET /favicon.ico", logo)
 	m.Handle("GET /statisch/", statisch())
 	a.sso.Wege(m, a.angemeldet)
-	m.HandleFunc("POST /api/lieferung", a.agentPruefen(a.lieferung))
+	m.HandleFunc("POST /api/lieferung", a.agentPruefen(func(w http.ResponseWriter, r *http.Request, host string) {
+		if a.nurMTLS {
+			alsJSON(w, http.StatusForbidden, map[string]string{"fehler": "Lieferungen nur per mTLS"})
+			return
+		}
+		a.lieferung(w, r, host)
+	}))
+	m.HandleFunc("GET /alarme", a.alarmeSeite)
+	m.HandleFunc("GET /sitzung/{id}", a.sitzung)
 	m.HandleFunc("GET /agent/trailr-agent", a.agentProgramm)
 	m.HandleFunc("GET /agent/trailr-agent.sha256", a.agentPruefsumme)
 	m.HandleFunc("GET /{$}", a.start)

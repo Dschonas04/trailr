@@ -1,0 +1,12 @@
+{{define "inhalt"}}
+<div class="leiste"><h1>Alarme</h1>{{if .D.Wege}}<span class="pille gut">geht an {{.D.Wege}}</span>{{else}}<span class="pille">nur hier</span>{{end}}</div>
+<p class="muted klein">Gemeldet werden fünf Fehlschläge in zehn Minuten, Anmeldungen aus neuer Quelle, stille Agenten und eine gebrochene Kette{{if .D.Arbeitszeit}}, dazu sudo und su außerhalb von {{.D.Arbeitszeit}}{{end}}.{{if not .D.Wege}} Telegram und Mail sind aus, bis sie in der .env stehen.{{end}}</p>
+{{if .D.Liste}}
+<div class="verlauf">
+{{range .D.Liste}}<div class="beitrag">
+  <div class="meta"><span class="pille {{.Klasse}}">{{.RegelName}}</span> <a href="/ereignisse?host={{.Host}}">{{.Host}}</a> · {{datum .Zeit}}{{if .Gesendet}} · gemeldet {{datum .Gesendet}}{{end}}</div>
+  <div class="umbruch">{{.Text}}</div>
+</div>{{end}}
+</div>
+{{else}}<div class="leer"><strong>Keine Alarme</strong>Bisher ist nichts aufgefallen.</div>{{end}}
+{{end}}
