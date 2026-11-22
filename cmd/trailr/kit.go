@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -95,13 +96,23 @@ var vorlagenFunktionen = template.FuncMap{
 		case d < time.Minute:
 			return "gerade eben"
 		case d < time.Hour:
-			return itoa(int(d.Minutes())) + " min"
+			return "vor " + itoa(int(d.Minutes())) + " min"
 		case d < 24*time.Hour:
-			return itoa(int(d.Hours())) + " h"
+			return "vor " + itoa(int(d.Hours())) + " h"
 		}
-		return itoa(int(d.Hours()/24)) + " Tg."
+		if tage := int(d.Hours() / 24); tage > 1 {
+			return "vor " + itoa(tage) + " Tagen"
+		}
+		return "vor 1 Tag"
 	},
 	"gleich": func(a, b any) bool { return a == b },
+	"mehrzahl": func(n int, eins, viele string) string {
+		if n == 1 {
+			return "1 " + eins
+		}
+		return itoa(n) + " " + viele
+	},
+	"kuerzel": kuerzel,
 	"json": func(v any) template.JS {
 		b, _ := json.Marshal(v)
 		return template.JS(b)
@@ -109,6 +120,17 @@ var vorlagenFunktionen = template.FuncMap{
 	"mehrzeilig": func(s string) template.HTML {
 		return template.HTML(strings.ReplaceAll(template.HTMLEscapeString(s), "\n", "<br>"))
 	},
+}
+
+// kuerzel: bis zu zwei Anfangsbuchstaben für das runde Namenszeichen.
+func kuerzel(name string) string {
+	var k []rune
+	for _, wort := range strings.Fields(name) {
+		if len(k) < 2 {
+			k = append(k, []rune(wort)[0])
+		}
+	}
+	return strings.ToUpper(string(k))
 }
 
 func itoa(i int) string {
@@ -197,9 +219,7 @@ func zurueck(w http.ResponseWriter, r *http.Request, ziel, hinweis string) {
 	http.Redirect(w, r, ziel, http.StatusSeeOther)
 }
 
-func urlEscape(s string) string {
-	return strings.NewReplacer(" ", "%20", "&", "%26", "?", "%3F", "#", "%23", "+", "%2B", "=", "%3D").Replace(s)
-}
+func urlEscape(s string) string { return url.QueryEscape(s) }
 
 func alsJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -252,9 +272,21 @@ func statisch() http.Handler {
 	}
 	fsrv := http.StripPrefix("/statisch/", http.FileServerFS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Cache-Control", "no-cache")
 		fsrv.ServeHTTP(w, r)
 	})
+}
+
+// logo liefert das Zeichen der App unter den Adressen, die Anmeldeseite und Browser erwarten.
+func logo(w http.ResponseWriter, _ *http.Request) {
+	b, err := webDateien.ReadFile("web/statisch/zeichen.svg")
+	if err != nil {
+		http.Error(w, "Zeichen fehlt", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(b)
 }
 
 func gesund(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) }

@@ -740,22 +740,22 @@ func ssoJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// Die Anmeldeseite sieht aus wie die von Nexora: graue Fläche, eine Karte,
-// ein blauer Knopf. Hell oder dunkel nach Systemeinstellung.
-const ssoSeitenStil = `:root{--bg:#f7f7f6;--flaeche:#fff;--grund:#efefed;--text:#37352f;--muted:#86847f;--border:#e2e2df;--accent:#1b6ec2;
---fehler-bg:#fdecea;--fehler-text:#c0392b;--ok-bg:rgba(46,160,67,.12);--ok-text:#1a7f37;--radius:6px;color-scheme:light dark}
-@media (prefers-color-scheme:dark){:root{--bg:#1f1f1e;--flaeche:#2a2a28;--grund:#191918;--text:#e6e5e2;--muted:#9a9892;--border:#3a3a37;
---accent:#2f80d1;--fehler-bg:rgba(207,34,46,.16);--fehler-text:#f28b82;--ok-bg:rgba(46,160,67,.16);--ok-text:#7ee2a0}}
+// Die Anmeldeseite trägt die Farben der App: graue Fläche, eine Karte,
+// ein schwarzer Knopf. Hell oder dunkel nach Systemeinstellung.
+const ssoSeitenStil = `:root{--bg:#f5f5f4;--flaeche:#fff;--grund:#f5f5f4;--text:#171717;--muted:#626260;--border:#e3e3e0;--accent:#171717;--accent-text:#fff;
+--fehler-bg:#fdecea;--fehler-text:#c0392b;--ok-bg:rgba(46,160,67,.12);--ok-text:#1a7f37;--radius:8px;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#101010;--flaeche:#191919;--grund:#101010;--text:#ededec;--muted:#a1a19f;--border:#2b2b2b;--accent-text:#111;
+--accent:#ededec;--fehler-bg:rgba(207,34,46,.16);--fehler-text:#f28b82;--ok-bg:rgba(46,160,67,.16);--ok-text:#7ee2a0}}
 *{box-sizing:border-box}html,body{height:100%}
 body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--text);background:var(--grund);
 display:flex;align-items:center;justify-content:center;padding:16px;-webkit-font-smoothing:antialiased}
-.karte{background:var(--flaeche);border:1px solid var(--border);border-radius:10px;padding:32px;width:340px;max-width:100%;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-h1{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:600;margin:0 0 4px}h1 img{width:26px;height:26px;border-radius:6px}
+.karte{background:var(--flaeche);border:1px solid var(--border);border-radius:14px;padding:36px;width:370px;max-width:100%;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+h1{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:600;margin:0 0 4px}h1 img{width:36px;height:36px;border-radius:9px}
 .sub{color:var(--muted);font-size:13px;margin:0 0 20px}
 .meldung{border-radius:var(--radius);padding:8px 11px;font-size:13px;margin:0 0 12px;background:var(--fehler-bg);color:var(--fehler-text)}
 .meldung.ok{background:var(--ok-bg);color:var(--ok-text)}
 .knopf{display:block;width:100%;padding:9px;margin-top:6px;font-size:14px;font-weight:500;text-align:center;text-decoration:none;
-color:#fff;background:var(--accent);border:1px solid var(--accent);border-radius:var(--radius)}
+color:var(--accent-text);background:var(--accent);border:1px solid var(--accent);border-radius:var(--radius)}
 .knopf:hover{filter:brightness(.92)}.knopf:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .fuss{text-align:center;font-size:12px;color:var(--muted);margin:16px 0 0;overflow-wrap:anywhere}
 label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px}

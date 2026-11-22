@@ -298,8 +298,7 @@ func (s *SSO) kontenZeigen(w http.ResponseWriter, r *http.Request, meldung strin
 
 	var b strings.Builder
 	if len(namen) == 0 {
-		b.WriteString(`<p class="sub">Noch kein Konto. Solange es keins gibt und SSO aus ist, ist ` + ssoHTML(s.App) +
-			` ohne Anmeldung offen. Das erste Konto schaltet die Anmeldung ein und meldet dich gleich damit an.</p>`)
+		b.WriteString(`<p class="sub">Noch kein Konto. Bis es eins gibt oder SSO an ist, kommt nur hinein, wer den Einrichtungscode hat. Das erste Konto schaltet die Anmeldung ein und meldet dich gleich damit an.</p>`)
 	} else {
 		b.WriteString(`<table>`)
 		for _, n := range namen {
@@ -414,7 +413,7 @@ func (s *SSO) kontoLoeschen(w http.ResponseWriter, r *http.Request) {
 	log.Printf("sso: Konto %q gelöscht", name)
 	text := "Konto " + name + " gelöscht."
 	if !s.Geschuetzt() {
-		text += " Es gibt kein Konto mehr und SSO ist aus: " + s.App + " ist jetzt ohne Anmeldung offen."
+		text += " Es gibt kein Konto mehr und SSO ist aus: Der Einrichtungscode steht nach einem Neustart im Log."
 	}
 	http.Redirect(w, r, "/sso/konten?gut=1&meldung="+url.QueryEscape(text), http.StatusSeeOther)
 }

@@ -66,6 +66,8 @@ func main() {
 func (a *App) wege() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /healthz", gesund)
+	m.HandleFunc("GET /favicon.svg", logo)
+	m.HandleFunc("GET /favicon.ico", logo)
 	m.Handle("GET /statisch/", statisch())
 	a.sso.Wege(m, a.angemeldet)
 	m.HandleFunc("POST /api/lieferung", a.agentPruefen(a.lieferung))
