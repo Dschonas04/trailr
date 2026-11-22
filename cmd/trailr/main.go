@@ -49,6 +49,7 @@ func main() {
 	// Agenten ist kein Geheimnis.
 	a.admins = adminListe(umgebung("TRAILR_ADMIN", ""))
 	a.sso.ErstesKonto = a.ersterAdmin
+	a.sso.KontoWeg = a.adminEntziehen
 	a.sso.Frei = []string{"/statisch/", "/healthz", "/api/lieferung", "/agent/"}
 	go a.aufraeumen(ctx)
 
@@ -85,6 +86,9 @@ func (a *App) wege() http.Handler {
 
 func (a *App) angemeldet(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !inhaltZuerst(w, r) {
+			return
+		}
 		// Anmeldung und Konten verwalten nur Admins; vor der Einrichtung, wer
 		// den Code aus dem Log hat.
 		if !a.sso.Geschuetzt() && a.sso.EinrichtungErlaubt(w, r) {

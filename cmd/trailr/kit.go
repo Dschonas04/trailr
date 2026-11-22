@@ -3,12 +3,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"html/template"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -226,6 +228,21 @@ func alsJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(v)
+}
+
+// inhaltZuerst liest die ganze Anfrage, bevor Rechte geprüft werden. Sonst
+// könnte ein langsam geschicktes Formular den Entzug seiner Rechte überdauern.
+func inhaltZuerst(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Body == nil {
+		return true
+	}
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<16))
+	if err != nil {
+		http.Error(w, "Die Anfrage ist unvollständig oder zu groß", http.StatusBadRequest)
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	return true
 }
 
 // ---------- Kopfzeilen ----------

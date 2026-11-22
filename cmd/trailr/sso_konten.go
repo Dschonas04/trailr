@@ -347,10 +347,28 @@ func (s *SSO) kontoSpeichern(w http.ResponseWriter, r *http.Request) {
 		s.kontenZeigen(w, r, "Die beiden Passwörter sind verschieden.", false)
 		return
 	}
-	ich, vorher := s.Wer(r)
 	neu := ssoKonto{Name: name, Hash: ssoPasswortHash(passwort)}
+	if _, da := s.konto(name); !da && s.KontoWeg != nil {
+		// Reste eines früheren Kontos mit diesem Namen, erst nach der Prüfung unten.
+		if _, angemeldet := s.Wer(r); angemeldet || s.notaus || (!s.Geschuetzt() && s.hatEinrichtcode(r)) {
+			if err := s.KontoWeg(r.Context(), "konto:"+name); err != nil {
+				log.Printf("sso: alte Rechte von %q: %v", name, err)
+				s.kontenZeigen(w, r, "Nicht gespeichert: Die Datenbank antwortet nicht.", false)
+				return
+			}
+		}
+	}
+	// Das Hashen dauert: wer fragt, zählt so, wie es jetzt ist.
+	ich, vorher := s.Wer(r)
 	s.mu.Lock()
-	einrichtung := !vorher && !s.notaus && len(s.konten) == 0
+	// Einrichten heißt: die App ist noch offen und der Code aus dem Log liegt vor.
+	einrichtung := !s.notaus && len(s.konten) == 0 &&
+		!(s.k.Aktiv && s.k.Aussteller != "" && s.k.ClientID != "") && s.hatEinrichtcode(r)
+	if !einrichtung && !vorher && !s.notaus {
+		s.mu.Unlock()
+		s.fehlerSeite(w, "Die Anmeldung gilt nicht mehr. Bitte neu anmelden.")
+		return
+	}
 	ersetzt := false
 	for i := range s.konten {
 		if s.konten[i].Name == name {
@@ -375,7 +393,7 @@ func (s *SSO) kontoSpeichern(w http.ResponseWriter, r *http.Request) {
 	log.Printf("sso: Konto %q %s", name, map[bool]string{true: "neues Passwort", false: "angelegt"}[ersetzt])
 	// Wer bisher ohne Anmeldung hier war (erstes Konto) oder sein eigenes
 	// Passwort ändert, bleibt angemeldet.
-	if !vorher || ich.Kennung == "konto:"+name {
+	if einrichtung || (s.notaus && !vorher) || ich.Kennung == "konto:"+name {
 		s.lokalAnmelden(w, r, neu)
 	}
 	text := "Konto " + name + " angelegt."
@@ -397,6 +415,13 @@ func (s *SSO) kontoLoeschen(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<14)
 	_ = r.ParseForm()
 	name := strings.ToLower(strings.TrimSpace(r.PostForm.Get("name")))
+	if _, da := s.konto(name); da && s.KontoWeg != nil {
+		if err := s.KontoWeg(r.Context(), "konto:"+name); err != nil {
+			log.Printf("sso: Rechte von %q entziehen: %v", name, err)
+			s.kontenZeigen(w, r, "Nicht gelöscht: Die Rechte ließen sich nicht entziehen.", false)
+			return
+		}
+	}
 	s.mu.Lock()
 	rest := s.konten[:0:0]
 	for _, k := range s.konten {
@@ -438,4 +463,13 @@ func (s *SSO) EinrichtungErlaubt(w http.ResponseWriter, r *http.Request) bool {
 	}
 	k, err := r.Cookie("sso_einrichten")
 	return err == nil && subtle.ConstantTimeCompare([]byte(k.Value), []byte(s.einrichtcode)) == 1
+}
+
+// hatEinrichtcode: der Code aus dem Log, aus der Adresse oder dem Keks.
+func (s *SSO) hatEinrichtcode(r *http.Request) bool {
+	c := r.URL.Query().Get("code")
+	if k, err := r.Cookie("sso_einrichten"); err == nil && c == "" {
+		c = k.Value
+	}
+	return c != "" && subtle.ConstantTimeCompare([]byte(c), []byte(s.einrichtcode)) == 1
 }

@@ -57,3 +57,10 @@ func (a *App) nurAdmin(h http.HandlerFunc) http.HandlerFunc {
 		h(w, r)
 	}
 }
+
+// adminEntziehen läuft vor dem Löschen eines Kontos und vor dem Anlegen eines
+// neuen mit demselben Namen: ein Name erbt keine Rechte.
+func (a *App) adminEntziehen(ctx context.Context, kennung string) error {
+	_, err := a.db.Exec(ctx, `DELETE FROM admins WHERE kennung = $1`, kennung)
+	return err
+}

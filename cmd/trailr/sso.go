@@ -80,8 +80,11 @@ type ssoKonto struct {
 type SSO struct {
 	// ErstesKonto läuft, wenn mit dem Einrichtungscode das erste Konto entsteht.
 	ErstesKonto func(ctx context.Context, kennung, name string) error
-	App         string // Anzeigename, z. B. "Foodr"
-	datei       string
+	// KontoWeg nimmt einem Namen alles, was an ihm hängt. Scheitert es, bleibt
+	// die Änderung am Konto aus.
+	KontoWeg func(ctx context.Context, kennung string) error
+	App      string // Anzeigename, z. B. "Foodr"
+	datei    string
 	// Schalter aus der Umgebung, siehe oben.
 	notaus bool
 	// Sperre: true = ohne Anmeldung kommt bei aktivem SSO niemand herein.
