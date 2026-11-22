@@ -26,13 +26,20 @@ const (
 	vieleFehlschlaege = 5
 	fehlMuster        = 100  // so viele Muster von Fehlschlägen je Lieferung werden gezählt
 	meldungMax        = 3500 // Telegram nimmt 4096 Zeichen
+	wegPause          = 5 * time.Minute
 	stilleNach        = 30 * time.Minute
 )
 
 type Alarme struct {
-	von, bis int // Arbeitszeit in Stunden, beide 0: keine Regel
-	melder   []melder
-	seit     time.Time // älteres wird nicht nachgeschickt
+	von, bis  int // Arbeitszeit in Stunden, beide 0: keine Regel
+	melder    []melder
+	seit      time.Time            // älteres wird nicht nachgeschickt
+	aussetzer map[string]aussetzer // Wege, die gerade gar nicht gehen
+}
+
+type aussetzer struct {
+	mal int
+	bis time.Time
 }
 
 type melder struct {
@@ -244,14 +251,29 @@ func (a *App) alarmeSenden(ctx context.Context) {
 	}
 }
 
-// alarmeUeber schickt einen Schub: Kette und Stille zuerst, dann reihum je
-// Host, damit ein lauter Host die anderen nicht verdrängt.
+// alarmeUeber schickt einen Schub. Wichtiges (Kette, Stille, Flut) und übriges
+// wechseln sich ab, Wichtiges zuerst: so hat beides immer Plätze. Darin geht es
+// reihum je Host, und was schon scheiterte, rückt nur in seiner Klasse nach hinten.
 func (a *App) alarmeUeber(ctx context.Context, m melder) error {
-	rows, err := a.db.Query(ctx, `SELECT id, host, text FROM (
-			SELECT id, host, text, versucht, regel IN ('kette', 'still', 'flut') AS wichtig,
-			       row_number() OVER (PARTITION BY host ORDER BY versucht NULLS FIRST, id) AS reihum
+	pause := a.alarme.aussetzer[m.name]
+	if time.Now().Before(pause.bis) {
+		return nil
+	}
+	rows, err := a.db.Query(ctx, `WITH offen AS (
+			SELECT id, host, text, regel IN ('kette', 'still', 'flut') AS wichtig,
+			       (versucht_je ->> $2)::float8 AS versucht
 			FROM alarme WHERE zeit > $1 AND NOT ($2 = ANY(gesendet_an))
-		) x ORDER BY versucht NULLS FIRST, wichtig DESC, reihum, id LIMIT 20`, a.alarme.seit, m.name)
+		), zuletzt AS (
+			SELECT host, max(gesendet) AS wann FROM alarme WHERE zeit > $1 GROUP BY host
+		), gereiht AS (
+			SELECT o.*, z.wann,
+			       row_number() OVER (PARTITION BY o.wichtig, o.host ORDER BY o.versucht NULLS FIRST, o.id) AS reihum
+			FROM offen o JOIN zuletzt z USING (host)
+		)
+		SELECT id, host, text FROM (
+			SELECT *, row_number() OVER (PARTITION BY wichtig ORDER BY versucht NULLS FIRST, reihum, wann NULLS FIRST, id) AS platz
+			FROM gereiht
+		) x ORDER BY platz, wichtig DESC LIMIT 20`, a.alarme.seit, m.name)
 	if err != nil {
 		return err
 	}
@@ -277,32 +299,56 @@ func (a *App) alarmeUeber(ctx context.Context, m melder) error {
 	if err := rows.Err(); err != nil || len(ids) == 0 {
 		return err
 	}
-	senden := func(z []string) error {
-		einmal, ende := context.WithTimeout(ctx, time.Minute)
-		defer ende()
-		return m.senden(einmal, "Trailr\n"+strings.Join(z, "\n"))
+
+	frist, ende := context.WithTimeout(ctx, time.Minute)
+	defer ende()
+	senden := func(z ...string) error {
+		return m.senden(frist, "Trailr\n"+strings.Join(z, "\n"))
 	}
-	fehler := senden(zeilen)
-	if fehler != nil && len(ids) > 1 {
-		// Liegt es an einer Meldung, kommen die anderen einzeln durch.
-		ids, zeilen = ids[:1], zeilen[:1]
-		if e := senden(zeilen); e == nil {
-			fehler = nil
-		}
-	}
+	raus, gescheitert := ids, []int64(nil)
+	fehler := senden(zeilen...)
 	if fehler != nil {
-		// Beim zweiten Fehlschlag hinten anstellen. Verloren geht keine.
-		if _, err := a.db.Exec(ctx, `UPDATE alarme SET versucht = now() WHERE id = $1 AND $2 = ANY(versucht_an)`, ids[0], m.name); err != nil {
-			return err
+		raus = nil
+		if len(ids) == 1 {
+			gescheitert = ids
+		} else {
+			// Liegt es an einzelnen Meldungen, kommen alle anderen einzeln durch.
+			for i, id := range ids {
+				if frist.Err() != nil {
+					break
+				}
+				if e := senden(zeilen[i]); e != nil {
+					gescheitert = append(gescheitert, id)
+				} else {
+					raus = append(raus, id)
+				}
+			}
 		}
-		if _, err := a.db.Exec(ctx, `UPDATE alarme SET versucht_an = array_append(versucht_an, $2) WHERE id = $1 AND NOT ($2 = ANY(versucht_an))`, ids[0], m.name); err != nil {
-			return err
-		}
-		return fehler
 	}
-	_, err = a.db.Exec(ctx, `UPDATE alarme SET gesendet = COALESCE(gesendet, now()), gesendet_an = array_append(gesendet_an, $2)
-		WHERE id = ANY($1)`, ids, m.name)
-	return err
+	if a.alarme.aussetzer == nil {
+		a.alarme.aussetzer = map[string]aussetzer{}
+	}
+	if len(raus) > 0 {
+		delete(a.alarme.aussetzer, m.name)
+	} else if pause.mal++; pause.mal >= 3 {
+		// Geht der ganze Weg nicht, klopft Trailr nicht alle 30 Sekunden zwanzigmal.
+		a.alarme.aussetzer[m.name] = aussetzer{mal: pause.mal, bis: time.Now().Add(wegPause)}
+	} else {
+		a.alarme.aussetzer[m.name] = pause
+	}
+	if len(gescheitert) > 0 {
+		if _, err := a.db.Exec(ctx, `UPDATE alarme SET versucht_je = versucht_je || jsonb_build_object($2::text, extract(epoch FROM clock_timestamp()))
+			WHERE id = ANY($1)`, gescheitert, m.name); err != nil {
+			return err
+		}
+	}
+	if len(raus) > 0 {
+		if _, err := a.db.Exec(ctx, `UPDATE alarme SET gesendet = COALESCE(gesendet, now()), gesendet_an = array_append(gesendet_an, $2)
+			WHERE id = ANY($1)`, raus, m.name); err != nil {
+			return err
+		}
+	}
+	return fehler
 }
 
 type Alarm struct {

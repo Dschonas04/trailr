@@ -2,6 +2,7 @@
 
 ## Unveröffentlicht
 
+- Sicherheit: Eine abgelehnte Meldung hält keine andere auf, Wichtiges behält seinen Vorrang, CSV ohne Steuerzeichen.
 - Sicherheit: CSV immer in Anführung und ohne Formeln, eine Flut verdeckt keine Alarme und keinen anderen Host, jeder Meldeweg für sich.
 - Sicherheit: Die Prüfung erkennt gelöschte älteste und vollständig gelöschte Einträge, Feldgrenzen im Hash lassen sich nicht schieben, ein Nullbyte hält die Lieferung nicht mehr auf.
 - Alarme (Oberfläche, auf Wunsch Telegram und Mail), Zeitleiste je Sitzung, Export als JSON und vollständiger als CSV.
