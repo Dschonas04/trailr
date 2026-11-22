@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,6 +22,8 @@ import (
 )
 
 type App struct {
+	// verwaltung: Änderungen an Konten, Rollen und Anmeldung laufen nacheinander.
+	verwaltung sync.Mutex
 	admins     []string // Vorgabe des Betreibers
 	db         *pgxpool.Pool
 	sso        *SSO
@@ -88,6 +91,12 @@ func (a *App) angemeldet(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !inhaltZuerst(w, r) {
 			return
+		}
+		// Erst sperren, dann prüfen: bis zum Speichern kann niemand die Rechte
+		// entziehen, auf die sich die Prüfung stützt.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			a.verwaltung.Lock()
+			defer a.verwaltung.Unlock()
 		}
 		// Anmeldung und Konten verwalten nur Admins; vor der Einrichtung, wer
 		// den Code aus dem Log hat.

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -98,6 +99,30 @@ func TestRechteEndenMitDemKonto(t *testing.T) {
 		})
 		if _, da := a.sso.konto("hintertuer"); da {
 			t.Errorf("entzogene Sitzung hat ein Konto angelegt: %d", w.Code)
+		}
+	})
+	t.Run("Entzug während des Wartens", func(t *testing.T) {
+		a, chefin := einrichten(t)
+		a.verwaltung.Lock()
+		fertig := make(chan struct{})
+		go func() {
+			defer close(fertig)
+			ruf(a, "POST", "/sso/konten", konto("hintertuer"), chefin, nil)
+		}()
+		time.Sleep(100 * time.Millisecond) // die Anfrage ist da und müsste warten
+		select {
+		case <-fertig:
+			a.verwaltung.Unlock()
+			t.Fatal("Änderung wartet nicht auf die laufende Verwaltung")
+		case <-time.After(2 * time.Second):
+		}
+		a.sso.mu.Lock()
+		a.sso.konten = nil
+		a.sso.mu.Unlock()
+		a.verwaltung.Unlock()
+		<-fertig
+		if _, da := a.sso.konto("hintertuer"); da {
+			t.Error("entzogene Sitzung hat nach dem Warten noch geändert")
 		}
 	})
 }
