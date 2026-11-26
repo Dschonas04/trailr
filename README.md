@@ -2,6 +2,15 @@
 <h1 align="center">Trailr</h1>
 <p align="center">Hält fest, wer was auf deinen Linux-Systemen tut, und merkt, wenn daran gedreht wird.</p>
 
+<p align="center">
+
+[![prüfen](https://github.com/Dschonas04/trailr/actions/workflows/pruefen.yml/badge.svg)](https://github.com/Dschonas04/trailr/actions/workflows/pruefen.yml)
+[![Go 1.27](https://img.shields.io/badge/Go-1.27-00ADD8)](https://go.dev)
+[![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1)](https://www.postgresql.org)
+[![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-blue.svg)](LICENSE)
+
+</p>
+
 ![Sitzung als Zeitleiste](docs/sitzung.png)
 
 ## Was es kann
@@ -69,4 +78,8 @@ TRAILR_TEST_DB=postgres://.../pruef_trailr go test -p 1 ./...
 make agent-pruefsumme   # nach jeder Änderung am Agenten in die Rolle eintragen
 ```
 
-Go 1.27.4, PostgreSQL 17. Lizenz: MIT, siehe [LICENSE](LICENSE).
+Go 1.27.4, PostgreSQL 17.
+
+## Lizenz
+
+MIT, siehe [LICENSE](LICENSE).
